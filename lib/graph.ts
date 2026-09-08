@@ -104,6 +104,54 @@ export function reachable(
     }
   return found;
 }
+export type PointerSelectionPlan = {
+  clickedSelection: Set<string>;
+  visibleSelection: Set<string>;
+  movementIds: Set<string>;
+  explicit: boolean;
+  startDrag: boolean;
+};
+export function pointerSelectionPlan(
+  map: VisionMap,
+  selected: ReadonlySet<string>,
+  explicitSelection: boolean,
+  objectId: string,
+  toggle: boolean,
+): PointerSelectionPlan {
+  const clickedSelection = new Set([objectId]);
+  if (toggle) {
+    const visibleSelection = new Set(selected);
+    if (visibleSelection.has(objectId)) visibleSelection.delete(objectId);
+    else visibleSelection.add(objectId);
+    return {
+      clickedSelection,
+      visibleSelection,
+      movementIds: new Set(),
+      explicit: true,
+      startDrag: false,
+    };
+  }
+  if (explicitSelection && selected.has(objectId)) {
+    return {
+      clickedSelection,
+      visibleSelection: new Set(selected),
+      movementIds: new Set(selected),
+      explicit: true,
+      startDrag: true,
+    };
+  }
+  const object = map.objects.find(({ id }) => id === objectId);
+  return {
+    clickedSelection,
+    visibleSelection: new Set(clickedSelection),
+    movementIds:
+      object?.type === 'NODE'
+        ? reachable(map, objectId)
+        : new Set(clickedSelection),
+    explicit: false,
+    startDrag: true,
+  };
+}
 export function relationType(a: CanvasObject, b: CanvasObject): RelationType {
   if (a.type === 'IMAGINATION' || b.type === 'IMAGINATION') return 'REFERENCE';
   if (a.type === 'SEED_BOX' || b.type === 'SEED_BOX') return 'RELATED';

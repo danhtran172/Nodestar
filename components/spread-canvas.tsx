@@ -21,6 +21,7 @@ import {
   reparent,
   moveSeed,
   patchObject,
+  pointerSelectionPlan,
 } from '@/lib/graph';
 import type { CanvasObject, VisionMap, Point } from '@/lib/graph';
 import type { Asset } from '@/lib/storage';
@@ -63,6 +64,7 @@ type Gesture = {
   seed?: string;
   moved: boolean;
   additive: boolean;
+  explicit: boolean;
 };
 
 function InlineText({
@@ -465,28 +467,20 @@ export function SpreadCanvas(p: Props) {
     }
     setPanning(pan);
     if (!pan && el.closest('[data-edge]')) return;
-    const ids = objId
-      ? p.selected.has(objId)
-        ? new Set(p.selected)
-        : new Set([objId])
-      : new Set<string>();
-    if (!pan && objId && (e.ctrlKey || e.metaKey)) {
-      const toggle = new Set(p.selected);
-      if (toggle.has(objId)) toggle.delete(objId);
-      else toggle.add(objId);
-      p.onSelect(toggle, true);
-      return;
-    }
-    const multi = p.explicit && p.selected.has(objId);
+    let ids = new Set<string>();
+    let gestureExplicit = false;
     if (!pan && objId) {
-      p.onSelect(ids, multi);
-      if (
-        !multi &&
-        p.map.objects.find((o) => o.id === objId)?.type === 'NODE'
-      ) {
-        ids.clear();
-        reachable(p.map, objId).forEach((id) => ids.add(id));
-      }
+      const plan = pointerSelectionPlan(
+        p.map,
+        p.selected,
+        p.explicit,
+        objId,
+        e.ctrlKey || e.metaKey,
+      );
+      p.onSelect(plan.visibleSelection, plan.explicit);
+      if (!plan.startDrag) return;
+      ids = plan.movementIds;
+      gestureExplicit = plan.explicit;
     }
     gesture.current = {
       kind: pan
@@ -507,6 +501,7 @@ export function SpreadCanvas(p: Props) {
       seed: el.closest<HTMLElement>('[data-seed]')?.dataset.seed,
       moved: false,
       additive: e.shiftKey,
+      explicit: gestureExplicit,
     };
     if (!pan && !objId && !e.shiftKey) p.onSelect(new Set());
   }
@@ -599,7 +594,7 @@ export function SpreadCanvas(p: Props) {
     let moved = moveObjects(g.base, g.ids, delta);
     if (
       hit &&
-      !p.explicit &&
+      !g.explicit &&
       g.base.objects.find((o) => o.id === g.id)?.type === 'NODE' &&
       hit.type === 'NODE'
     ) {
