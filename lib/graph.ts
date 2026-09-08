@@ -548,6 +548,144 @@ export function reflowBranch(map: VisionMap, ids: Set<string>): VisionMap {
   }
   return { ...map, objects: map.objects.map((o) => positions.get(o.id) || o) };
 }
+export type PredictiveLayoutInput = {
+  baseMap: VisionMap;
+  movingIds: ReadonlySet<string>;
+  dragDelta: Point;
+  draggedRootId: string;
+  optionalTargetId?: string;
+  explicitSelection: boolean;
+};
+export type RelationshipChange = {
+  removedId?: string;
+  added?: Relationship;
+  attachmentId?: string;
+};
+export type PredictiveLayoutResult = {
+  previewMap: VisionMap;
+  valid: boolean;
+  message?: string;
+  relationshipChange?: RelationshipChange;
+  affectedObjectIds: Set<string>;
+};
+const layoutGap = 24;
+function overlaps(a: CanvasObject, b: CanvasObject) {
+  return (
+    a.x < b.x + b.width + layoutGap &&
+    a.x + a.width + layoutGap > b.x &&
+    a.y < b.y + objectHeight(b) + layoutGap &&
+    a.y + objectHeight(a) + layoutGap > b.y
+  );
+}
+function collisionFreeTranslation(
+  map: VisionMap,
+  movingIds: ReadonlySet<string>,
+  delta: Point,
+) {
+  const moving = map.objects.filter((object) => movingIds.has(object.id));
+  const fixed = map.objects.filter((object) => !movingIds.has(object.id));
+  const step = Math.max(
+    36,
+    ...moving.map((object) => objectHeight(object) + layoutGap),
+  );
+  let offsetY = 0;
+  for (let attempt = 0; attempt < 201; attempt++) {
+    const translated = moving.map((object) => ({
+      ...object,
+      x: object.x + delta.x,
+      y: object.y + delta.y + offsetY,
+    }));
+    if (!translated.some((object) => fixed.some((item) => overlaps(object, item)))) {
+      const positions = new Map(translated.map((object) => [object.id, object]));
+      return {
+        ...map,
+        objects: map.objects.map((object) => positions.get(object.id) || object),
+      };
+    }
+    const distance = (Math.floor(attempt / 2) + 1) * step;
+    offsetY = attempt % 2 === 0 ? distance : -distance;
+  }
+  return moveObjects(map, new Set(movingIds), delta);
+}
+function deterministicRelationshipId(
+  map: VisionMap,
+  sourceId: string,
+  targetId: string,
+) {
+  const prefix = `layout:${sourceId}:${targetId}`;
+  let id = prefix;
+  let suffix = 1;
+  const used = new Set(map.relationships.map((relationship) => relationship.id));
+  while (used.has(id)) id = `${prefix}:${suffix++}`;
+  return id;
+}
+export function predictiveLayout(
+  input: PredictiveLayoutInput,
+): PredictiveLayoutResult {
+  const affectedObjectIds = new Set(input.movingIds);
+  let semanticMap = input.baseMap;
+  let relationshipChange: RelationshipChange | undefined;
+  let invalidMessage: string | undefined;
+  if (input.optionalTargetId && !input.explicitSelection) {
+    const root = input.baseMap.objects.find(
+      (object) => object.id === input.draggedRootId,
+    );
+    const target = input.baseMap.objects.find(
+      (object) => object.id === input.optionalTargetId,
+    );
+    if (!root || !target || root.type !== 'NODE' || target.type !== 'NODE')
+      invalidMessage = 'Drop on a node or goal.';
+    else if (reachable(input.baseMap, root.id).has(target.id))
+      invalidMessage = 'This would create a circular path.';
+    else {
+      const removedId = root.attachment;
+      const relationships = input.baseMap.relationships.filter(
+        (relationship) => relationship.id !== removedId,
+      );
+      const existing = relationships.find(
+        (relationship) =>
+          relationship.type === 'PATH' &&
+          relationship.sourceId === target.id &&
+          relationship.targetId === root.id,
+      );
+      const added = existing
+        ? undefined
+        : {
+            id: deterministicRelationshipId(
+              { ...input.baseMap, relationships },
+              target.id,
+              root.id,
+            ),
+            sourceId: target.id,
+            targetId: root.id,
+            type: 'PATH' as const,
+          };
+      const attachmentId = existing?.id || added!.id;
+      semanticMap = {
+        ...input.baseMap,
+        relationships: added ? [...relationships, added] : relationships,
+        objects: input.baseMap.objects.map((object) =>
+          object.id === root.id
+            ? { ...object, attachment: attachmentId }
+            : object,
+        ),
+      };
+      relationshipChange = { removedId, added, attachmentId };
+    }
+  }
+  const previewMap = collisionFreeTranslation(
+    invalidMessage ? input.baseMap : semanticMap,
+    input.movingIds,
+    input.dragDelta,
+  );
+  return {
+    previewMap,
+    valid: !invalidMessage,
+    message: invalidMessage,
+    relationshipChange,
+    affectedObjectIds,
+  };
+}
 export function seedLayout(o: CanvasObject) {
   const available = o.width - 66;
   const seeds = [...o.seeds].sort(

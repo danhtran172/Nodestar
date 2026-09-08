@@ -17,11 +17,10 @@ import {
   seedLayout,
   edgePath,
   reachable,
-  moveObjects,
-  reparent,
   moveSeed,
   patchObject,
   pointerSelectionPlan,
+  predictiveLayout,
 } from '@/lib/graph';
 import type { CanvasObject, VisionMap, Point } from '@/lib/graph';
 import type { Asset } from '@/lib/storage';
@@ -589,14 +588,13 @@ export function SpreadCanvas(p: Props) {
       .find(
         (o) =>
           o.id !== g.id &&
-          !g.ids.has(o.id) &&
           pt.x >= o.x - 14 &&
           pt.x <= o.x + o.width + 14 &&
           pt.y >= o.y - 14 &&
           pt.y <= o.y + objectHeight(o) + 14,
       );
-    setTarget(hit?.id || '');
     if (g.kind === 'seed') {
+      setTarget(hit?.id || '');
       try {
         setLive(moveSeed(g.base, g.id, g.seed!, pt, hit?.id).map);
       } catch (err) {
@@ -604,20 +602,21 @@ export function SpreadCanvas(p: Props) {
       }
       return;
     }
-    let moved = moveObjects(g.base, g.ids, delta);
-    if (
-      hit &&
-      !g.explicit &&
-      g.base.objects.find((o) => o.id === g.id)?.type === 'NODE' &&
-      hit.type === 'NODE'
-    ) {
-      try {
-        moved = reparent(moved, g.id, hit.id);
-        setLive(moved);
-      } catch (err) {
-        setLive(moved, (err as Error).message);
-      }
-    } else setLive(moved);
+    const draggedObject = g.base.objects.find((object) => object.id === g.id);
+    const semanticTarget =
+      hit && !g.explicit && draggedObject?.type === 'NODE' && hit.type === 'NODE'
+        ? hit
+        : undefined;
+    setTarget(semanticTarget?.id || '');
+    const result = predictiveLayout({
+      baseMap: g.base,
+      movingIds: g.ids,
+      dragDelta: delta,
+      draggedRootId: g.id,
+      optionalTargetId: semanticTarget?.id,
+      explicitSelection: g.explicit,
+    });
+    setLive(result.previewMap, result.valid ? undefined : result.message);
   }
   function up(e: ReactPointerEvent<HTMLDivElement>) {
     setPanning(false);
