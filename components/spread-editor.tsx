@@ -914,7 +914,7 @@ export default function SpreadEditor() {
             </div>
           )}
           {(focus || connecting) && (
-            <div className="focus-banner" data-ui>
+            <div className="focus-banner" data-ui data-canvas-overlay>
               {connecting ? (
                 <>
                   <Link2 size={16} />
@@ -938,7 +938,7 @@ export default function SpreadEditor() {
             </div>
           )}
           {!editing && (one || selected.size > 1 || edgeObject) && (
-            <div className="context-tools" data-ui>
+            <div className="context-tools" data-ui data-canvas-overlay>
               {edgeObject ? (
                 <>
                   <span className="context-label">
@@ -1133,7 +1133,7 @@ export default function SpreadEditor() {
               )}
             </div>
           )}
-          <div className="main-tools" data-ui>
+          <div className="main-tools" data-ui data-canvas-overlay>
             <button
               className={mode === 'select' ? 'active' : ''}
               aria-label="Select tool"

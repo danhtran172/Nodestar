@@ -26,6 +26,7 @@ import {
 import type { CanvasObject, VisionMap, Point } from '@/lib/graph';
 import type { Asset } from '@/lib/storage';
 import { edgeOccluders } from '@/lib/edge-occlusion';
+const canvasOverlay = '[data-canvas-overlay]';
 export type Viewport = Point & { zoom: number };
 type Props = {
   map: VisionMap;
@@ -420,7 +421,11 @@ export function SpreadCanvas(p: Props) {
   useEffect(() => {
     const el = root.current!;
     const wheel = (e: WheelEvent) => {
-      if ((e.target as HTMLElement).closest('button,input,textarea,[data-ui]'))
+      if (
+        (e.target as HTMLElement).closest(
+          `button,input,textarea,[data-ui],${canvasOverlay}`,
+        )
+      )
         return;
       e.preventDefault();
       const v = viewRef.current,
@@ -442,7 +447,10 @@ export function SpreadCanvas(p: Props) {
   }, [updateViewport]);
   function down(e: ReactPointerEvent<HTMLDivElement>) {
     const el = e.target as HTMLElement;
-    if (el.closest('button,input,textarea,[data-ui]')) return;
+    if (
+      el.closest(`button,input,textarea,[data-ui],${canvasOverlay}`)
+    )
+      return;
     if (e.button === 2) e.preventDefault();
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 2) {
@@ -660,7 +668,10 @@ export function SpreadCanvas(p: Props) {
       }}
       onDoubleClick={(e) => {
         const el = e.target as HTMLElement;
-        if (el.closest('button,input,textarea,[data-ui]')) return;
+        if (
+          el.closest(`button,input,textarea,[data-ui],${canvasOverlay}`)
+        )
+          return;
         const id = el.closest<HTMLElement>('[data-object]')?.dataset.object;
         if (id) {
           const o = p.map.objects.find((o) => o.id === id);
@@ -669,6 +680,7 @@ export function SpreadCanvas(p: Props) {
         } else p.onCreate(world({ x: e.clientX, y: e.clientY }));
       }}
       onContextMenu={(e) => {
+        if ((e.target as HTMLElement).closest(canvasOverlay)) return;
         e.preventDefault();
       }}
       onDragOver={(e) => {
