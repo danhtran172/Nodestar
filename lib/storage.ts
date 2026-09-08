@@ -1,4 +1,4 @@
-import type { VisionMap } from './graph';
+import type { WorkspaceSnapshot } from './workspace-snapshot';
 export type Asset = {
   id: string;
   filename: string;
@@ -37,10 +37,27 @@ async function put(store: string, value: unknown, key?: string) {
     tx.onabort = () => reject(tx.error);
   });
 }
-export async function saveMap(map: VisionMap) {
-  await put('maps', map, 'current');
+export async function saveMap(snapshot: WorkspaceSnapshot) {
+  const database = await db();
+  return new Promise<void>((resolve, reject) => {
+    const tx = database.transaction('maps', 'readwrite');
+    const table = tx.objectStore('maps');
+    const current = table.get('current');
+    current.onsuccess = () => {
+      const stored = current.result as Partial<WorkspaceSnapshot> | undefined;
+      const storedRevision =
+        stored?.schemaVersion === 1 && Number.isSafeInteger(stored.revision)
+          ? stored.revision!
+          : 0;
+      if (snapshot.revision >= storedRevision) table.put(snapshot, 'current');
+    };
+    current.onerror = () => tx.abort();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || current.error);
+  });
 }
-export async function loadMap(): Promise<VisionMap | null> {
+export async function loadMap(): Promise<unknown> {
   const database = await db();
   return new Promise((resolve, reject) => {
     const request = database

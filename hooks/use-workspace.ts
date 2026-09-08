@@ -5,6 +5,11 @@ import { demoMap, validateMap } from '@/lib/graph';
 import type { VisionMap } from '@/lib/graph';
 import { loadMap, loadAssets, saveMap } from '@/lib/storage';
 import type { Asset } from '@/lib/storage';
+import {
+  chooseWorkspaceSnapshot,
+  decodeWorkspaceSnapshot,
+  makeWorkspaceSnapshot,
+} from '@/lib/workspace-snapshot';
 export function useWorkspace() {
   const [map, setMap] = useState<VisionMap | null>(null),
     [assets, setAssets] = useState<Record<string, Asset>>({});
@@ -14,20 +19,28 @@ export function useWorkspace() {
     past = useRef<VisionMap[]>([]),
     future = useRef<VisionMap[]>([]);
   const writeQueue = useRef(Promise.resolve()),
-    generation = useRef(0);
+    generation = useRef(0),
+    assetStoreHealthy = useRef(true);
   const persist = useCallback((next: VisionMap) => {
     const token = ++generation.current;
+    const snapshot = makeWorkspaceSnapshot(next, token);
+    setRevision(token);
     setStatus('Saving…');
     try {
-      localStorage.setItem('spread-recovery-v1', JSON.stringify(next));
+      localStorage.setItem('spread-recovery-v1', JSON.stringify(snapshot));
     } catch {
       /* IndexedDB is the durable primary store. */
     }
     writeQueue.current = writeQueue.current
       .catch(() => {})
-      .then(() => saveMap(next))
+      .then(() => saveMap(snapshot))
       .then(() => {
-        if (token === generation.current) setStatus('Saved on this device');
+        if (token === generation.current)
+          setStatus(
+            assetStoreHealthy.current
+              ? 'Saved on this device'
+              : 'Storage issue — export a backup',
+          );
       })
       .catch(() => {
         if (token === generation.current)
@@ -37,26 +50,49 @@ export function useWorkspace() {
   useEffect(() => {
     let live = true;
     void (async () => {
-      let recovered: VisionMap | null = null;
+      let localSnapshot = null;
       try {
         const raw = localStorage.getItem('spread-recovery-v1');
-        if (raw) recovered = validateMap(JSON.parse(raw));
+        if (raw)
+          localSnapshot = decodeWorkspaceSnapshot(
+            JSON.parse(raw),
+            validateMap,
+          );
       } catch {
         /* Try database without overwriting the recovery copy. */
       }
-      try {
-        const [stored, images] = await Promise.all([loadMap(), loadAssets()]);
-        if (!live) return;
-        setAssets(images);
-        recovered ??= stored ? validateMap(stored) : null;
-        setStatus('Saved on this device');
-      } catch {
-        if (live) setStatus('Storage issue — export a backup');
+      const [mapResult, assetResult] = await Promise.allSettled([
+        loadMap(),
+        loadAssets(),
+      ]);
+      if (!live) return;
+      let databaseSnapshot = null;
+      let mapStoreHealthy = mapResult.status === 'fulfilled';
+      if (mapResult.status === 'fulfilled') {
+        try {
+          databaseSnapshot = decodeWorkspaceSnapshot(
+            mapResult.value,
+            validateMap,
+          );
+        } catch {
+          mapStoreHealthy = false;
+        }
       }
-      if (live) {
-        current.current = recovered || demoMap();
-        setMap(current.current);
-      }
+      assetStoreHealthy.current = assetResult.status === 'fulfilled';
+      if (assetResult.status === 'fulfilled') setAssets(assetResult.value);
+      const snapshot = chooseWorkspaceSnapshot(
+        localSnapshot,
+        databaseSnapshot,
+      );
+      generation.current = snapshot?.revision || 0;
+      setRevision(generation.current);
+      setStatus(
+        mapStoreHealthy && assetStoreHealthy.current
+          ? 'Saved on this device'
+          : 'Storage issue — export a backup',
+      );
+      current.current = snapshot?.map || demoMap();
+      setMap(current.current);
     })();
     return () => {
       live = false;
@@ -72,7 +108,6 @@ export function useWorkspace() {
       future.current = [];
       current.current = next;
       setMap(next);
-      setRevision((r) => r + 1);
       persist(next);
     },
     [persist],
@@ -83,7 +118,6 @@ export function useWorkspace() {
     future.current.push(current.current);
     current.current = previous;
     setMap(previous);
-    setRevision((r) => r + 1);
     persist(previous);
   }, [persist]);
   const redo = useCallback(() => {
@@ -92,7 +126,6 @@ export function useWorkspace() {
     past.current.push(current.current);
     current.current = next;
     setMap(next);
-    setRevision((r) => r + 1);
     persist(next);
   }, [persist]);
   return {
