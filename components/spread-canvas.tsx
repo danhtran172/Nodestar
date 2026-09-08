@@ -25,6 +25,7 @@ import {
 } from '@/lib/graph';
 import type { CanvasObject, VisionMap, Point } from '@/lib/graph';
 import type { Asset } from '@/lib/storage';
+import type { ImageRequestOrigin } from '@/lib/image-request';
 import { edgeOccluders } from '@/lib/edge-occlusion';
 const canvasOverlay = '[data-canvas-overlay]';
 export type Viewport = Point & { zoom: number };
@@ -51,7 +52,11 @@ type Props = {
   onOpen: (id: string) => void;
   onSeed: (id: string) => void;
   onError: (s: string) => void;
-  onFiles: (files: File[], target?: string) => void;
+  onFiles: (
+    files: File[],
+    target?: string,
+    origin?: ImageRequestOrigin,
+  ) => void;
   children?: React.ReactNode;
 };
 type Gesture = {
@@ -695,7 +700,7 @@ export function SpreadCanvas(p: Props) {
           const id = (e.target as HTMLElement).closest<HTMLElement>(
             '[data-object]',
           )?.dataset.object;
-          p.onFiles(Array.from(e.dataTransfer.files), id);
+          p.onFiles(Array.from(e.dataTransfer.files), id, 'drop');
         }
       }}
     >

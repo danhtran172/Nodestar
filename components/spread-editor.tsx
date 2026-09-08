@@ -97,6 +97,8 @@ import {
 import type { VisionMap, CanvasObject, Kind, Point } from '@/lib/graph';
 import { processImage, saveAsset } from '@/lib/storage';
 import type { Asset } from '@/lib/storage';
+import { shouldRejectImagePaste } from '@/lib/image-request';
+import type { ImageRequestOrigin } from '@/lib/image-request';
 
 const labels = {
   NODE: 'Node',
@@ -379,7 +381,12 @@ export default function SpreadEditor() {
       .catch(() => {});
     notify(`${selected.size} object${selected.size > 1 ? 's' : ''} copied`);
   }
-  async function files(input: File[], target?: string, replace?: string) {
+  async function files(
+    input: File[],
+    target?: string,
+    replace?: string,
+    _origin: ImageRequestOrigin = 'picker',
+  ) {
     const images = input.filter((f) => f.type.startsWith('image/'));
     if (!images.length) {
       notify('Choose an image file.');
@@ -653,7 +660,18 @@ export default function SpreadEditor() {
       const imageFiles = Array.from(e.clipboardData?.files || []);
       if (imageFiles.length) {
         e.preventDefault();
-        void files(imageFiles);
+        if (
+          shouldRejectImagePaste(
+            imageFiles.map((file) => file.type),
+            selected.size,
+          )
+        ) {
+          notify(
+            'Select one object to add this image, or clear selection to create an Imagination.',
+          );
+          return;
+        }
+        void files(imageFiles, undefined, undefined, 'paste');
         return;
       }
       try {
@@ -891,7 +909,9 @@ export default function SpreadEditor() {
             setSeedText('');
           }}
           onError={notify}
-          onFiles={files}
+          onFiles={(input, target, origin) =>
+            void files(input, target, undefined, origin)
+          }
         >
           {map.objects.length === 0 && (
             <div className="empty-canvas" data-ui>
@@ -1414,6 +1434,7 @@ export default function SpreadEditor() {
               Array.from(e.target.files || []),
               imageTarget.current.id,
               imageTarget.current.replace,
+              'picker',
             );
             e.target.value = '';
           }}
