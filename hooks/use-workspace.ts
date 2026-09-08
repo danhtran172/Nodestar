@@ -3,16 +3,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { demoMap, validateMap } from '@/lib/graph';
 import type { VisionMap } from '@/lib/graph';
-import { loadMap, loadAssets, saveMap } from '@/lib/storage';
+import {
+  loadMap,
+  loadAssets,
+  saveMap,
+  saveAssetsAndMap,
+} from '@/lib/storage';
 import type { Asset } from '@/lib/storage';
 import {
   chooseWorkspaceSnapshot,
   decodeWorkspaceSnapshot,
   makeWorkspaceSnapshot,
 } from '@/lib/workspace-snapshot';
+import { quarantineMissingAssetReferences } from '@/lib/image-request';
 export function useWorkspace() {
   const [map, setMap] = useState<VisionMap | null>(null),
-    [assets, setAssets] = useState<Record<string, Asset>>({});
+    [assets, setAssets] = useState<Record<string, Asset>>({}),
+    [orphanedAssets, setOrphanedAssets] = useState<string[]>([]);
   const [status, setStatus] = useState('Loading…'),
     [revision, setRevision] = useState(0);
   const current = useRef<VisionMap | null>(null),
@@ -91,7 +98,15 @@ export function useWorkspace() {
           ? 'Saved on this device'
           : 'Storage issue — export a backup',
       );
-      current.current = snapshot?.map || demoMap();
+      const loaded = snapshot?.map || demoMap();
+      if (assetResult.status === 'fulfilled') {
+        const checked = quarantineMissingAssetReferences(
+          loaded,
+          new Set(Object.keys(assetResult.value)),
+        );
+        current.current = checked.map;
+        setOrphanedAssets(checked.missing);
+      } else current.current = loaded;
       setMap(current.current);
     })();
     return () => {
@@ -128,6 +143,50 @@ export function useWorkspace() {
     setMap(next);
     persist(next);
   }, [persist]);
+  const commitWithAssets = useCallback(
+    async (
+      durableAssets: readonly Asset[],
+      change: VisionMap | ((m: VisionMap) => VisionMap),
+    ) => {
+      const before = current.current;
+      if (!before) return false;
+      const next = typeof change === 'function' ? change(before) : change;
+      if (next === before) return false;
+      const token = ++generation.current;
+      const snapshot = makeWorkspaceSnapshot(next, token);
+      setRevision(token);
+      setStatus('Saving…');
+      const write = writeQueue.current
+        .catch(() => {})
+        .then(() => saveAssetsAndMap(durableAssets, snapshot));
+      writeQueue.current = write.then(
+        () => {},
+        () => {},
+      );
+      try {
+        const saved = await write;
+        if (!saved || token !== generation.current) return false;
+        try {
+          localStorage.setItem('spread-recovery-v1', JSON.stringify(snapshot));
+        } catch {
+          /* IndexedDB transaction remains the durable source. */
+        }
+        past.current = [...past.current.slice(-99), before];
+        future.current = [];
+        current.current = next;
+        setMap(next);
+        assetStoreHealthy.current = true;
+        setStatus('Saved on this device');
+        return true;
+      } catch {
+        if (token === generation.current)
+          setStatus('Storage issue — export a backup');
+        assetStoreHealthy.current = false;
+        return false;
+      }
+    },
+    [],
+  );
   return {
     map,
     current,
@@ -138,6 +197,10 @@ export function useWorkspace() {
     setAssets,
     status,
     saveDraft: persist,
+    commitWithAssets,
+    orphanedAssets,
+    dismissOrphanedAsset: (id: string) =>
+      setOrphanedAssets((current) => current.filter((item) => item !== id)),
     canUndo: past.current.length > 0,
     canRedo: future.current.length > 0,
     revision,

@@ -674,6 +674,58 @@ textarea:focus-visible {
   padding: 4px;
   border-radius: 5px;
 }
+
+.image-repair-tray {
+  position: fixed;
+  right: 18px;
+  bottom: 82px;
+  z-index: 70;
+  display: grid;
+  width: min(390px, calc(100vw - 36px));
+  gap: 8px;
+}
+
+.image-repair-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-destructive) 35%, transparent);
+  border-radius: 14px;
+  background: var(--color-popover);
+  box-shadow: 0 12px 32px rgb(41 33 24 / 14%);
+}
+
+.image-repair-item img {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  object-fit: cover;
+}
+
+.image-repair-item span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.image-repair-item strong,
+.image-repair-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.image-repair-item small {
+  color: var(--color-muted-foreground);
+}
+
+.image-repair-item button {
+  border: 0;
+  background: transparent;
+  color: var(--color-foreground);
+  font-weight: 650;
+}
 .far-zoom .reference,
 .far-zoom .related,
 .far-zoom .object-label,

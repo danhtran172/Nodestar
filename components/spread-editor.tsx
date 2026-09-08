@@ -112,6 +112,43 @@ const icons = {
   SEED_BOX: Sprout,
   IMAGINATION: ImageIcon,
 };
+type PendingImageRequest = {
+  asset: Asset;
+  destinationId: string;
+  createAt?: Point;
+  replaceId?: string;
+  origin: ImageRequestOrigin;
+  status: 'pending' | 'error';
+  error?: string;
+};
+
+function applyImageReference(map: VisionMap, request: PendingImageRequest) {
+  let target = map.objects.find((object) => object.id === request.destinationId);
+  let next = map;
+  if (!target && request.createAt) {
+    target = freePosition(map, {
+      ...makeObject(
+        'IMAGINATION',
+        request.createAt,
+        'NORMAL',
+        'Imagination',
+      ),
+      id: request.destinationId,
+    });
+    next = { ...map, objects: [...map.objects, target] };
+  }
+  if (!target) throw new Error('The image target no longer exists.');
+  return patchObject(next, target.id, {
+    images:
+      target.type === 'NODE'
+        ? [request.asset.id]
+        : request.replaceId
+          ? target.images.flatMap((id) =>
+              id === request.replaceId ? [request.asset.id] : [id],
+            )
+          : [...target.images, request.asset.id],
+  });
+}
 export default function SpreadEditor() {
   const ws = useWorkspace(),
     { map, commit, undo, redo, assets, setAssets } = ws;
@@ -138,6 +175,9 @@ export default function SpreadEditor() {
     [viewer, setViewer] = useState('');
   const [online, setOnline] = useState(true),
     [busy, setBusy] = useState(false),
+    [pendingImages, setPendingImages] = useState<
+      Record<string, PendingImageRequest>
+    >({}),
     [installPrompt, setInstallPrompt] = useState<{
       prompt: () => Promise<void>;
     } | null>(null);
@@ -396,72 +436,83 @@ export default function SpreadEditor() {
       (o) => o.id === (target || [...selected][0]),
     );
     const list = chosen?.type === 'NODE' ? images.slice(0, 1) : images;
+    const destinationId =
+      chosen && chosen.type !== 'SEED_BOX' ? chosen.id : crypto.randomUUID();
+    const createAt =
+      chosen?.type === 'SEED_BOX'
+        ? { x: chosen.x + chosen.width + 60, y: chosen.y }
+        : chosen
+          ? undefined
+          : center();
     setBusy(true);
     try {
-      const added: Asset[] = [];
       for (const file of list) {
         try {
           const asset = await processImage(file);
-          added.push(asset);
-          setAssets((current) => ({ ...current, [asset.id]: asset }));
+          const request: PendingImageRequest = {
+            asset,
+            destinationId,
+            createAt,
+            replaceId: replace,
+            origin: _origin,
+            status: 'pending',
+          };
+          setPendingImages((current) => ({
+            ...current,
+            [asset.id]: request,
+          }));
+          await persistImageRequest(request);
         } catch (e) {
           notify((e as Error).message);
-        }
-      }
-      if (!added.length) return;
-      commit((m) => {
-        let o = m.objects.find((x) => x.id === chosen?.id),
-          next = m;
-        if (!o || o.type === 'SEED_BOX') {
-          o = freePosition(
-            m,
-            makeObject(
-              'IMAGINATION',
-              chosen
-                ? { x: chosen.x + chosen.width + 60, y: chosen.y }
-                : center(),
-              'NORMAL',
-              'Imagination',
-            ),
-          );
-          next = { ...m, objects: [...m.objects, o] };
-        }
-        const ids = added.map((a) => a.id);
-        return patchObject(next, o.id, {
-          images:
-            o.type === 'NODE'
-              ? [ids[0]]
-              : replace
-                ? o.images.flatMap((id) => (id === replace ? ids : [id]))
-                : [...o.images, ...ids],
-        });
-      });
-      for (const asset of added) {
-        try {
-          await saveAsset(asset);
-        } catch {
-          setAssets((current) => ({
-            ...current,
-            [asset.id]: {
-              ...asset,
-              status: 'error',
-              error: 'Storage full or unavailable',
-            },
-          }));
-          notify(
-            'The image is visible but could not be saved. Open details to retry or remove it.',
-          );
         }
       }
     } finally {
       setBusy(false);
     }
   }
+  async function persistImageRequest(request: PendingImageRequest) {
+    setPendingImages((current) => ({
+      ...current,
+      [request.asset.id]: {
+        ...request,
+        status: 'pending',
+        error: undefined,
+      },
+    }));
+    const saved = await ws.commitWithAssets([request.asset], (current) =>
+      applyImageReference(current, request),
+    );
+    if (!saved) {
+      setPendingImages((current) => ({
+        ...current,
+        [request.asset.id]: {
+          ...request,
+          status: 'error',
+          error: 'Storage full or unavailable',
+        },
+      }));
+      notify('Image could not be saved. Retry or remove the pending image.');
+      return;
+    }
+    setAssets((current) => ({
+      ...current,
+      [request.asset.id]: {
+        ...request.asset,
+        status: 'saved',
+        error: undefined,
+      },
+    }));
+    setPendingImages((current) => {
+      const next = { ...current };
+      delete next[request.asset.id];
+      return next;
+    });
+  }
   function chooseImages(id?: string, replace?: string) {
     imageTarget.current = { id, replace };
     imageInput.current?.click();
   }
-  async function retryImage(id: string) {
+  async function retryStoredImage(id: string) {
     const a = assets[id];
     if (!a) return;
     try {
@@ -538,10 +589,18 @@ export default function SpreadEditor() {
         for (const id of o.images)
           if (!value.assets?.[id]?.preview?.startsWith('data:image/'))
             throw Error('This backup is missing an image.');
-      for (const a of Object.values(value.assets || {}) as Asset[])
-        await saveAsset(a);
-      setAssets((current) => ({ ...current, ...value.assets }));
-      commit(m);
+      const imported = Object.values(value.assets || {}) as Asset[];
+      if (!(await ws.commitWithAssets(imported, m)))
+        throw Error('The backup could not be saved on this device.');
+      setAssets((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          imported.map((asset) => [
+            asset.id,
+            { ...asset, status: 'saved', error: undefined },
+          ]),
+        ),
+      }));
       setSelected(new Set());
       setFocus('');
       setDetail('');
@@ -1251,7 +1310,7 @@ export default function SpreadEditor() {
           }}
           onPatch={patch}
           onImages={chooseImages}
-          onRetry={retryImage}
+          onRetry={retryStoredImage}
           onSeed={(id) => {
             setSeedBox(id);
             setSeedText('');
@@ -1423,6 +1482,59 @@ export default function SpreadEditor() {
             </p>
           </DialogContent>
         </Dialog>
+        {(Object.keys(pendingImages).length > 0 ||
+          ws.orphanedAssets.length > 0) && (
+          <aside className="image-repair-tray" data-canvas-overlay>
+            {Object.values(pendingImages).map((request) => (
+              <div className="image-repair-item" key={request.asset.id}>
+                <img
+                  src={request.asset.preview}
+                  alt={request.asset.filename}
+                />
+                <span>
+                  <strong>{request.asset.filename}</strong>
+                  <small>
+                    {request.status === 'pending'
+                      ? 'Saving image…'
+                      : request.error}
+                  </small>
+                </span>
+                {request.status === 'error' && (
+                  <>
+                    <button onClick={() => void persistImageRequest(request)}>
+                      Retry
+                    </button>
+                    <button
+                      onClick={() =>
+                        setPendingImages((current) => {
+                          const next = { ...current };
+                          delete next[request.asset.id];
+                          return next;
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+            {ws.orphanedAssets.map((id) => (
+              <div className="image-repair-item legacy" key={id}>
+                <span>
+                  <strong>Image unavailable</strong>
+                  <small>
+                    Original image data is no longer available. Retry is not
+                    possible.
+                  </small>
+                </span>
+                <button onClick={() => ws.dismissOrphanedAsset(id)}>
+                  Remove
+                </button>
+              </div>
+            ))}
+          </aside>
+        )}
         <input
           hidden
           ref={imageInput}

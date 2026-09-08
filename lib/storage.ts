@@ -37,25 +37,42 @@ async function put(store: string, value: unknown, key?: string) {
     tx.onabort = () => reject(tx.error);
   });
 }
-export async function saveMap(snapshot: WorkspaceSnapshot) {
+export async function saveAssetsAndMap(
+  assets: readonly Asset[],
+  snapshot: WorkspaceSnapshot,
+) {
   const database = await db();
-  return new Promise<void>((resolve, reject) => {
-    const tx = database.transaction('maps', 'readwrite');
-    const table = tx.objectStore('maps');
-    const current = table.get('current');
+  return new Promise<boolean>((resolve, reject) => {
+    const tx = database.transaction(['assets', 'maps'], 'readwrite');
+    const maps = tx.objectStore('maps');
+    const current = maps.get('current');
+    let committed = false;
     current.onsuccess = () => {
-      const stored = current.result as Partial<WorkspaceSnapshot> | undefined;
-      const storedRevision =
-        stored?.schemaVersion === 1 && Number.isSafeInteger(stored.revision)
-          ? stored.revision!
-          : 0;
-      if (snapshot.revision >= storedRevision) table.put(snapshot, 'current');
+      try {
+        const stored = current.result as Partial<WorkspaceSnapshot> | undefined;
+        const storedRevision =
+          stored?.schemaVersion === 1 && Number.isSafeInteger(stored.revision)
+            ? stored.revision!
+            : 0;
+        if (snapshot.revision < storedRevision) return;
+        const assetStore = tx.objectStore('assets');
+        for (const asset of assets)
+          assetStore.put({ ...asset, status: 'saved', error: undefined });
+        maps.put(snapshot, 'current');
+        committed = true;
+      } catch {
+        tx.abort();
+      }
     };
     current.onerror = () => tx.abort();
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => resolve(committed);
     tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || current.error);
+    tx.onabort = () =>
+      reject(tx.error || current.error || new Error('Storage transaction failed.'));
   });
+}
+export async function saveMap(snapshot: WorkspaceSnapshot) {
+  await saveAssetsAndMap([], snapshot);
 }
 export async function loadMap(): Promise<unknown> {
   const database = await db();
