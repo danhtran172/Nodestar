@@ -21,6 +21,7 @@ import {
   patchObject,
   pointerSelectionPlan,
   predictiveLayout,
+  nextVisualShuffle,
 } from '@/lib/graph';
 import type { CanvasObject, VisionMap, Point } from '@/lib/graph';
 import type { Asset } from '@/lib/storage';
@@ -642,7 +643,7 @@ export function SpreadCanvas(p: Props) {
             ...next,
             objects: next.objects.map((o) =>
               g.ids.has(o.id) && o.type === 'SEED_BOX'
-                ? { ...o, shuffle: Math.random() }
+                ? { ...o, shuffle: nextVisualShuffle(o.shuffle) }
                 : o,
             ),
           };

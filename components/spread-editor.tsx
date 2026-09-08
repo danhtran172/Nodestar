@@ -93,6 +93,7 @@ import {
   moveSeed,
   moveObjects,
   validateMap,
+  nextVisualShuffle,
 } from '@/lib/graph';
 import type { VisionMap, CanvasObject, Kind, Point } from '@/lib/graph';
 import { processImage, saveAsset } from '@/lib/storage';
@@ -1120,7 +1121,9 @@ export default function SpreadEditor() {
                       </Popover>
                       <button
                         onClick={() =>
-                          patch(one.id, { shuffle: Math.random() })
+                          patch(one.id, {
+                            shuffle: nextVisualShuffle(one.shuffle),
+                          })
                         }
                       >
                         <Shuffle size={16} /> Shuffle

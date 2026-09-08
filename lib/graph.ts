@@ -686,49 +686,123 @@ export function predictiveLayout(
     affectedObjectIds,
   };
 }
+function deterministicUnit(values: readonly number[]) {
+  let state = 0x811c9dc5;
+  for (const value of values) {
+    let part = Math.floor(Math.abs(value) * 1_000_003) >>> 0;
+    for (let index = 0; index < 4; index++) {
+      state ^= part & 0xff;
+      state = Math.imul(state, 0x01000193) >>> 0;
+      part >>>= 8;
+    }
+  }
+  state += 0x6d2b79f5;
+  let mixed = state;
+  mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+  mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+  return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+}
+export function nextVisualShuffle(current: number) {
+  return deterministicUnit([current, 0.61803398875, 17]);
+}
 export function seedLayout(o: CanvasObject) {
-  const available = o.width - 66;
-  const seeds = [...o.seeds].sort(
-    (a, b) =>
-      Math.sin((a.visualSeed + o.shuffle) * 100) -
-      Math.sin((b.visualSeed + o.shuffle) * 100),
-  );
-  let x = 6,
-    y = 10,
-    rowHeight = 0;
-  const positions = seeds.map((seed) => {
+  const available = Math.max(96, o.width - 44);
+  const items = o.seeds.map((seed, index) => {
+    const random = (salt: number) =>
+      deterministicUnit([
+        seed.visualSeed,
+        o.shuffle,
+        o.width,
+        o.height,
+        index,
+        salt,
+      ]);
+    const idealWidth = Math.max(85, seed.text.length * 7.7 + 25);
     const width = Math.min(
-      available - 16,
-      Math.max(85, seed.text.length * 7.7 + 25),
+      available - 18,
+      idealWidth * (0.88 + random(1) * 0.12),
     );
+    const charactersPerLine = Math.max(1, Math.floor((width - 24) / 9));
     const height = Math.max(
       38,
-      Math.ceil(seed.text.length / Math.max(1, Math.floor((width - 24) / 9))) *
-        20 +
-        18,
+      Math.ceil(seed.text.length / charactersPerLine) * 20 + 18,
     );
-    const rotation =
-      height < 65 ? Math.sin((seed.visualSeed + o.shuffle) * 13) * 7 : 0;
-    const bounds =
-      height + Math.abs(Math.sin((rotation * Math.PI) / 180)) * width;
-    if (x + width > available) {
-      x = 6;
-      y += rowHeight + 15;
-      rowHeight = 0;
-    }
-    const placed = {
+    const readableScale = height > 86 ? 0.16 : height > 64 ? 0.42 : 1;
+    const direction = random(2) < 0.5 ? -1 : 1;
+    const rotation = Math.max(
+      -35,
+      Math.min(35, direction * (5 + random(3) * 10) * readableScale),
+    );
+    const radians = (Math.abs(rotation) * Math.PI) / 180;
+    const boundsWidth =
+      Math.abs(Math.cos(radians)) * width + Math.sin(radians) * height;
+    const boundsHeight =
+      Math.sin(radians) * width + Math.abs(Math.cos(radians)) * height;
+    return {
       seed,
-      x,
-      y: y + bounds / 2 - height / 2,
       width,
       height,
       rotation,
+      boundsWidth,
+      boundsHeight,
+      gap: 9 + random(4) * 13,
+      rowOffset: random(5) * 18,
+      rowGap: 11 + random(6) * 12,
     };
-    x += width + 22;
-    rowHeight = Math.max(rowHeight, bounds);
-    return placed;
   });
-  return { positions, height: y + rowHeight + 12 };
+  const rows: (typeof items)[] = [];
+  let row: typeof items = [];
+  let rowWidth = 0;
+  for (const item of items) {
+    const required = item.boundsWidth + (row.length ? row.at(-1)!.gap : 0);
+    if (row.length && rowWidth + required > available) {
+      rows.push(row);
+      row = [];
+      rowWidth = 0;
+    }
+    row.push(item);
+    rowWidth += item.boundsWidth + (row.length > 1 ? row.at(-2)!.gap : 0);
+  }
+  if (row.length) rows.push(row);
+
+  const positions: Array<{
+    seed: Seed;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation: number;
+  }> = [];
+  let y = 8;
+  for (const currentRow of rows) {
+    const height = Math.max(...currentRow.map((item) => item.boundsHeight));
+    const contentWidth = currentRow.reduce(
+      (total, item, index) =>
+        total + item.boundsWidth + (index ? currentRow[index - 1].gap : 0),
+      0,
+    );
+    let x = Math.min(
+      currentRow[0].rowOffset,
+      Math.max(0, available - contentWidth),
+    );
+    for (const item of currentRow) {
+      const boundsY = y + height - item.boundsHeight;
+      positions.push({
+        seed: item.seed,
+        x: x + (item.boundsWidth - item.width) / 2,
+        y: boundsY + (item.boundsHeight - item.height) / 2,
+        width: item.width,
+        height: item.height,
+        rotation: item.rotation,
+      });
+      x += item.boundsWidth + item.gap;
+    }
+    y += height + currentRow[0].rowGap;
+  }
+  return {
+    positions,
+    height: rows.length ? y - rows.at(-1)![0].rowGap + 8 : 16,
+  };
 }
 export function addSeed(map: VisionMap, id: string, text: string): VisionMap {
   const o = map.objects.find((o) => o.id === id);
@@ -748,7 +822,7 @@ export function addSeed(map: VisionMap, id: string, text: string): VisionMap {
     seeds,
     tier,
     height: Math.max(o.height, 115 + seeds.length * 48),
-    shuffle: Math.random(),
+    shuffle: nextVisualShuffle(o.shuffle),
   });
 }
 export function moveSeed(
