@@ -1,0 +1,718 @@
+export type Kind = 'NODE' | 'SEED_BOX' | 'IMAGINATION';
+export type RelationType = 'PATH' | 'RELATED' | 'REFERENCE';
+export type Seed = { id: string; text: string; visualSeed: number };
+export type CanvasObject = {
+  id: string;
+  type: Kind;
+  role: 'NORMAL' | 'GOAL';
+  text: string;
+  note: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  images: string[];
+  seeds: Seed[];
+  tier: number;
+  shuffle: number;
+  focal: number;
+  attachment?: string;
+  createdAt: number;
+  updatedAt: number;
+};
+export type Relationship = {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  type: RelationType;
+};
+export type VisionMap = {
+  version: 1;
+  title: string;
+  anchorId: string;
+  objects: CanvasObject[];
+  relationships: Relationship[];
+};
+export type Point = { x: number; y: number };
+export const uid = () => crypto.randomUUID();
+export function makeObject(
+  type: Kind,
+  p: Point,
+  role: CanvasObject['role'] = 'NORMAL',
+  text = '',
+): CanvasObject {
+  return {
+    id: uid(),
+    type,
+    role,
+    text,
+    note: '',
+    ...p,
+    width: type === 'NODE' ? (role === 'GOAL' ? 280 : 210) : 310,
+    height: type === 'NODE' ? 90 : 240,
+    images: [],
+    seeds: [],
+    tier: 10,
+    shuffle: Math.random(),
+    focal: 50,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+export function objectHeight(o: CanvasObject) {
+  if (o.type === 'SEED_BOX')
+    return Math.max(o.height, seedLayout(o).height + 115);
+  if (o.type !== 'NODE') return o.height;
+  const goal = o.role === 'GOAL';
+  const columns = Math.max(
+    8,
+    Math.floor(
+      (o.width - (goal ? 50 : 44) - (!goal && o.images.length ? 61 : 0)) /
+        (goal ? 12 : 8.5),
+    ),
+  );
+  const lines = o.text
+    .split('\n')
+    .reduce(
+      (total, line) => total + Math.max(1, Math.ceil(line.length / columns)),
+      0,
+    );
+  return goal
+    ? 77 + lines * 32 + (o.images.length ? 145 : 0)
+    : 44 + Math.max(o.images.length ? 48 : 30, lines * 24);
+}
+export function reachable(
+  map: VisionMap,
+  id: string,
+  reverse = false,
+): Set<string> {
+  const found = new Set<string>([id]);
+  const queue = [id];
+  const adjacency = new Map<string, string[]>();
+  for (const e of map.relationships)
+    if (e.type === 'PATH') {
+      const a = reverse ? e.targetId : e.sourceId,
+        b = reverse ? e.sourceId : e.targetId;
+      adjacency.set(a, [...(adjacency.get(a) || []), b]);
+    }
+  for (let i = 0; i < queue.length; i++)
+    for (const next of adjacency.get(queue[i]) || []) {
+      if (!found.has(next)) {
+        found.add(next);
+        queue.push(next);
+      }
+    }
+  return found;
+}
+export function relationType(a: CanvasObject, b: CanvasObject): RelationType {
+  if (a.type === 'IMAGINATION' || b.type === 'IMAGINATION') return 'REFERENCE';
+  if (a.type === 'SEED_BOX' || b.type === 'SEED_BOX') return 'RELATED';
+  return 'PATH';
+}
+export function relationError(
+  map: VisionMap,
+  sourceId: string,
+  targetId: string,
+  type: RelationType,
+  ignoreId?: string,
+): string | null {
+  if (sourceId === targetId) return 'An object cannot connect to itself.';
+  const a = map.objects.find((o) => o.id === sourceId),
+    b = map.objects.find((o) => o.id === targetId);
+  if (!a || !b) return 'This object no longer exists.';
+  if (type === 'PATH' && (a.type !== 'NODE' || b.type !== 'NODE'))
+    return 'Paths connect nodes and goals only.';
+  if (
+    type === 'REFERENCE' &&
+    !(
+      (a.type === 'IMAGINATION' && b.type === 'NODE') ||
+      (b.type === 'IMAGINATION' && a.type === 'NODE')
+    )
+  )
+    return 'Connect an Imagination to a node or goal.';
+  if (
+    type === 'RELATED' &&
+    (a.type === 'IMAGINATION' || b.type === 'IMAGINATION')
+  )
+    return 'Imagination uses reference connections.';
+  const rest = {
+    ...map,
+    relationships: map.relationships.filter((e) => e.id !== ignoreId),
+  };
+  if (
+    rest.relationships.some(
+      (e) =>
+        (e.sourceId === sourceId && e.targetId === targetId) ||
+        (e.sourceId === targetId && e.targetId === sourceId),
+    )
+  )
+    return 'These objects are already connected. Edit the existing connection.';
+  if (type === 'PATH' && reachable(rest, targetId).has(sourceId))
+    return 'This would create a circular path.';
+  return null;
+}
+export function connect(
+  map: VisionMap,
+  sourceId: string,
+  targetId: string,
+  type?: RelationType,
+): VisionMap {
+  const a = map.objects.find((o) => o.id === sourceId),
+    b = map.objects.find((o) => o.id === targetId);
+  if (!a || !b) throw new Error('This object no longer exists.');
+  type ??= relationType(a, b);
+  const error = relationError(map, sourceId, targetId, type);
+  if (error) throw new Error(error);
+  if (type === 'REFERENCE' && b.type === 'IMAGINATION')
+    [sourceId, targetId] = [targetId, sourceId];
+  const edge = { id: uid(), sourceId, targetId, type };
+  return {
+    ...map,
+    relationships: [...map.relationships, edge],
+    objects: map.objects.map((o) =>
+      o.id === targetId && type === 'PATH' && !o.attachment
+        ? { ...o, attachment: edge.id }
+        : o,
+    ),
+  };
+}
+export function demoMap(): VisionMap {
+  const items: [string, number, number, CanvasObject['role']][] = [
+    ['A life with room to create', 40, 30, 'GOAL'],
+    ['Build my own studio', 490, -180, 'GOAL'],
+    ['Make meaningful work', 480, 170, 'NORMAL'],
+    ['Explore a new direction', -350, -120, 'NORMAL'],
+    ['A daily creative practice', -350, 110, 'NORMAL'],
+    ['Share what I make', 810, 170, 'NORMAL'],
+    ['Find my people', 490, 360, 'NORMAL'],
+    ['A little more freedom', 30, -240, 'NORMAL'],
+  ];
+  const objects = items.map(([text, x, y, role]) =>
+    makeObject('NODE', { x, y }, role, text),
+  );
+  const seeds = makeObject(
+    'SEED_BOX',
+    { x: -355, y: 340 },
+    'NORMAL',
+    'Things I’m curious about',
+  );
+  seeds.seeds = [
+    'A month by the sea',
+    'Learn ceramics',
+    'Write a small book',
+    'A slower morning',
+  ].map((text) => ({ id: uid(), text, visualSeed: Math.random() }));
+  const mood = makeObject(
+    'IMAGINATION',
+    { x: 860, y: -190 },
+    'NORMAL',
+    'Room to imagine',
+  );
+  mood.note =
+    'Collect the spaces, textures and moments that feel like your future.';
+  let map: VisionMap = {
+    version: 1,
+    title: 'My next chapter',
+    anchorId: objects[0].id,
+    objects: [...objects, seeds, mood],
+    relationships: [],
+  };
+  for (const [a, b] of [
+    [3, 0],
+    [4, 0],
+    [7, 0],
+    [2, 1],
+    [5, 2],
+    [6, 1],
+    [4, 2],
+  ])
+    map = connect(map, objects[a].id, objects[b].id);
+  map = connect(map, seeds.id, objects[4].id);
+  return connect(map, mood.id, objects[1].id);
+}
+
+export function patchObject(
+  map: VisionMap,
+  id: string,
+  patch: Partial<CanvasObject>,
+): VisionMap {
+  return {
+    ...map,
+    objects: map.objects.map((o) =>
+      o.id === id ? { ...o, ...patch, updatedAt: Date.now() } : o,
+    ),
+  };
+}
+export function removeEdge(map: VisionMap, id: string): VisionMap {
+  const relationships = map.relationships.filter((e) => e.id !== id);
+  return {
+    ...map,
+    relationships,
+    objects: map.objects.map((o) =>
+      o.attachment === id
+        ? {
+            ...o,
+            attachment: relationships.find(
+              (e) => e.type === 'PATH' && e.targetId === o.id,
+            )?.id,
+          }
+        : o,
+    ),
+  };
+}
+export function editEdge(
+  map: VisionMap,
+  id: string,
+  reverse: boolean,
+  type?: RelationType,
+): VisionMap {
+  const edge = map.relationships.find((e) => e.id === id);
+  if (!edge) return map;
+  if (reverse && edge.type !== 'PATH') return map;
+  const a = reverse ? edge.targetId : edge.sourceId,
+    b = reverse ? edge.sourceId : edge.targetId;
+  const next = connect(removeEdge(map, id), a, b, type || edge.type);
+  const generated = next.relationships[next.relationships.length - 1].id;
+  return {
+    ...next,
+    relationships: next.relationships.map((e) =>
+      e.id === generated ? { ...e, id } : e,
+    ),
+    objects: next.objects.map((o) =>
+      o.attachment === generated ? { ...o, attachment: id } : o,
+    ),
+  };
+}
+export function deletionError(map: VisionMap, ids: Set<string>): string | null {
+  for (const id of ids) {
+    const incoming = map.relationships.filter(
+      (e) => e.type === 'PATH' && e.targetId === id,
+    ).length;
+    const outgoing = map.relationships.filter(
+      (e) => e.type === 'PATH' && e.sourceId === id,
+    ).length;
+    if (incoming > 1 && outgoing > 1)
+      return 'Disconnect a path first. This node has multiple incoming and outgoing paths.';
+  }
+  return null;
+}
+export function deleteObjects(map: VisionMap, ids: Set<string>): VisionMap {
+  const error = deletionError(map, ids);
+  if (error) throw new Error(error);
+  // Walk through the complete deleted set before reconnecting its surviving boundaries.
+  const bridges: [string, string][] = [];
+  for (const e of map.relationships)
+    if (e.type === 'PATH' && !ids.has(e.sourceId) && ids.has(e.targetId)) {
+      const queue = [e.targetId],
+        seen = new Set(queue);
+      for (let i = 0; i < queue.length; i++)
+        for (const out of map.relationships.filter(
+          (x) => x.type === 'PATH' && x.sourceId === queue[i],
+        )) {
+          if (!ids.has(out.targetId)) bridges.push([e.sourceId, out.targetId]);
+          else if (!seen.has(out.targetId)) {
+            seen.add(out.targetId);
+            queue.push(out.targetId);
+          }
+        }
+    }
+  let next: VisionMap = {
+    ...map,
+    objects: map.objects.filter((o) => !ids.has(o.id)),
+    relationships: map.relationships.filter(
+      (e) => !ids.has(e.sourceId) && !ids.has(e.targetId),
+    ),
+  };
+  next.objects = next.objects.map((o) => ({
+    ...o,
+    attachment: next.relationships.some((e) => e.id === o.attachment)
+      ? o.attachment
+      : next.relationships.find((e) => e.type === 'PATH' && e.targetId === o.id)
+          ?.id,
+  }));
+  for (const [a, b] of bridges)
+    if (!relationError(next, a, b, 'PATH')) next = connect(next, a, b, 'PATH');
+  if (ids.has(next.anchorId))
+    next.anchorId = next.objects.find((o) => o.type === 'NODE')?.id || '';
+  return next;
+}
+export function copySelection(map: VisionMap, ids: Set<string>): VisionMap {
+  const relationships = map.relationships.filter(
+    (e) => ids.has(e.sourceId) && ids.has(e.targetId),
+  );
+  const objects = map.objects
+    .filter((o) => ids.has(o.id))
+    .map((o) => ({
+      ...o,
+      attachment: relationships.some((e) => e.id === o.attachment)
+        ? o.attachment
+        : undefined,
+    }));
+  return {
+    ...map,
+    anchorId: ids.has(map.anchorId) ? map.anchorId : objects[0]?.id || '',
+    objects,
+    relationships,
+  };
+}
+export function duplicate(
+  map: VisionMap,
+  source: VisionMap,
+  offset: Point = { x: 45, y: 45 },
+): { map: VisionMap; ids: string[] } {
+  const ids = new Map(source.objects.map((o) => [o.id, uid()]));
+  const edges = source.relationships
+    .filter((e) => ids.has(e.sourceId) && ids.has(e.targetId))
+    .map((e) => ({
+      ...e,
+      id: uid(),
+      sourceId: ids.get(e.sourceId)!,
+      targetId: ids.get(e.targetId)!,
+    }));
+  const objects = source.objects.map((o) => ({
+    ...structuredClone(o),
+    id: ids.get(o.id)!,
+    x: o.x + offset.x,
+    y: o.y + offset.y,
+    attachment: edges.find(
+      (e) => e.targetId === ids.get(o.id) && e.type === 'PATH',
+    )?.id,
+    seeds: o.seeds.map((s) => ({ ...s, id: uid(), visualSeed: Math.random() })),
+    shuffle: Math.random(),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }));
+  return {
+    map: {
+      ...map,
+      objects: [...map.objects, ...objects],
+      relationships: [...map.relationships, ...edges],
+    },
+    ids: objects.map((o) => o.id),
+  };
+}
+export function intersects(
+  a: CanvasObject,
+  b: CanvasObject,
+  padding = 22,
+): boolean {
+  return (
+    a.x < b.x + b.width + padding &&
+    a.x + a.width + padding > b.x &&
+    a.y < b.y + objectHeight(b) + padding &&
+    a.y + objectHeight(a) + padding > b.y
+  );
+}
+export function freePosition(
+  map: VisionMap,
+  object: CanvasObject,
+): CanvasObject {
+  let next = { ...object };
+  for (let i = 0; i < map.objects.length + 1; i++) {
+    const hit = map.objects.find(
+      (o) => o.id !== next.id && intersects(next, o),
+    );
+    if (!hit) break;
+    next = { ...next, y: hit.y + objectHeight(hit) + 32 };
+  }
+  return next;
+}
+export function branch(
+  map: VisionMap,
+  id: string,
+): { map: VisionMap; object: CanvasObject } {
+  const parent = map.objects.find((o) => o.id === id);
+  if (!parent || parent.type !== 'NODE')
+    throw new Error('Select a node first.');
+  const anchor = map.objects.find((o) => o.id === map.anchorId) || parent;
+  const left = parent.x < anchor.x;
+  const object = freePosition(
+    map,
+    makeObject('NODE', {
+      x: left ? parent.x - 330 : parent.x + parent.width + 110,
+      y: parent.y,
+    }),
+  );
+  const next = { ...map, objects: [...map.objects, object] };
+  return {
+    map:
+      parent.role === 'GOAL'
+        ? connect(next, object.id, parent.id)
+        : connect(next, parent.id, object.id),
+    object,
+  };
+}
+export function moveObjects(
+  map: VisionMap,
+  ids: Set<string>,
+  delta: Point,
+): VisionMap {
+  return {
+    ...map,
+    objects: map.objects.map((o) =>
+      ids.has(o.id) ? { ...o, x: o.x + delta.x, y: o.y + delta.y } : o,
+    ),
+  };
+}
+export function reparent(
+  map: VisionMap,
+  id: string,
+  targetId: string,
+): VisionMap {
+  const object = map.objects.find((o) => o.id === id),
+    target = map.objects.find((o) => o.id === targetId);
+  if (!object || !target || object.type !== 'NODE' || target.type !== 'NODE')
+    throw new Error('Drop on a node or goal.');
+  if (reachable(map, id).has(targetId))
+    throw new Error('This would create a circular path.');
+  let next = object.attachment ? removeEdge(map, object.attachment) : map;
+  next = connect(next, targetId, id, 'PATH');
+  const attached = next.relationships[next.relationships.length - 1];
+  next = patchObject(next, id, { attachment: attached.id });
+  const moving = reachable(next, id);
+  const anchor = map.objects.find((o) => o.id === map.anchorId);
+  const left = target.x < (anchor?.x ?? 0);
+  const desired = freePosition(
+    { ...next, objects: next.objects.filter((o) => !moving.has(o.id)) },
+    {
+      ...object,
+      x: left ? target.x - object.width - 100 : target.x + target.width + 100,
+      y: target.y,
+    },
+  );
+  return reflowBranch(
+    moveObjects(next, moving, {
+      x: desired.x - object.x,
+      y: desired.y - object.y,
+    }),
+    moving,
+  );
+}
+export function reflowBranch(map: VisionMap, ids: Set<string>): VisionMap {
+  const fixed = map.objects.filter((o) => !ids.has(o.id) || o.role === 'GOAL');
+  const positions = new Map<string, CanvasObject>();
+  for (const o of map.objects.filter(
+    (o) => ids.has(o.id) && o.role !== 'GOAL',
+  )) {
+    const placed = freePosition({ ...map, objects: fixed }, o);
+    fixed.push(placed);
+    positions.set(o.id, placed);
+  }
+  return { ...map, objects: map.objects.map((o) => positions.get(o.id) || o) };
+}
+export function seedLayout(o: CanvasObject) {
+  const available = o.width - 66;
+  const seeds = [...o.seeds].sort(
+    (a, b) =>
+      Math.sin((a.visualSeed + o.shuffle) * 100) -
+      Math.sin((b.visualSeed + o.shuffle) * 100),
+  );
+  let x = 6,
+    y = 10,
+    rowHeight = 0;
+  const positions = seeds.map((seed) => {
+    const width = Math.min(
+      available - 16,
+      Math.max(85, seed.text.length * 7.7 + 25),
+    );
+    const height = Math.max(
+      38,
+      Math.ceil(seed.text.length / Math.max(1, Math.floor((width - 24) / 9))) *
+        20 +
+        18,
+    );
+    const rotation =
+      height < 65 ? Math.sin((seed.visualSeed + o.shuffle) * 13) * 7 : 0;
+    const bounds =
+      height + Math.abs(Math.sin((rotation * Math.PI) / 180)) * width;
+    if (x + width > available) {
+      x = 6;
+      y += rowHeight + 15;
+      rowHeight = 0;
+    }
+    const placed = {
+      seed,
+      x,
+      y: y + bounds / 2 - height / 2,
+      width,
+      height,
+      rotation,
+    };
+    x += width + 22;
+    rowHeight = Math.max(rowHeight, bounds);
+    return placed;
+  });
+  return { positions, height: y + rowHeight + 12 };
+}
+export function addSeed(map: VisionMap, id: string, text: string): VisionMap {
+  const o = map.objects.find((o) => o.id === id);
+  if (!o || o.type !== 'SEED_BOX') throw new Error('Select a Seed Box.');
+  if (!text.trim()) return map;
+  if (o.seeds.length >= 30)
+    throw new Error('Maximum 30 seeds in this Seed Box.');
+  const seeds = [
+    ...o.seeds,
+    { id: uid(), text: text.trim(), visualSeed: Math.random() },
+  ];
+  const tier = Math.max(
+    o.tier,
+    seeds.length > 20 ? 30 : seeds.length > 10 ? 20 : 10,
+  );
+  return patchObject(map, id, {
+    seeds,
+    tier,
+    height: Math.max(o.height, 115 + seeds.length * 48),
+    shuffle: Math.random(),
+  });
+}
+export function moveSeed(
+  map: VisionMap,
+  boxId: string,
+  seedId: string,
+  p: Point,
+  targetId?: string,
+): { map: VisionMap; id: string } {
+  const box = map.objects.find((o) => o.id === boxId),
+    seed = box?.seeds.find((s) => s.id === seedId);
+  if (!seed || !box) throw new Error('This seed no longer exists.');
+  const target = map.objects.find((o) => o.id === targetId);
+  if (target?.id === boxId) return { map, id: boxId };
+  let next = patchObject(map, boxId, {
+    seeds: box.seeds.filter((s) => s.id !== seedId),
+  });
+  if (target?.type === 'SEED_BOX') {
+    if (target.seeds.length >= 30)
+      throw new Error('Maximum 30 seeds in this Seed Box.');
+    const seeds = [...target.seeds, seed];
+    next = patchObject(next, target.id, {
+      seeds,
+      tier: Math.max(
+        target.tier,
+        seeds.length > 20 ? 30 : seeds.length > 10 ? 20 : 10,
+      ),
+      height: Math.max(target.height, 115 + seeds.length * 48),
+    });
+    return { map: next, id: target.id };
+  }
+  if (target && target.type !== 'NODE')
+    throw new Error('Drop on the canvas, a node, or another Seed Box.');
+  const node = freePosition(next, makeObject('NODE', p, 'NORMAL', seed.text));
+  next = { ...next, objects: [...next.objects, node] };
+  if (target)
+    next =
+      target.role === 'GOAL'
+        ? connect(next, node.id, target.id)
+        : connect(next, target.id, node.id);
+  return { map: next, id: node.id };
+}
+export function edgePath(a: CanvasObject, b: CanvasObject): string {
+  const ac = { x: a.x + a.width / 2, y: a.y + objectHeight(a) / 2 },
+    bc = { x: b.x + b.width / 2, y: b.y + objectHeight(b) / 2 };
+  const dx = bc.x - ac.x,
+    dy = bc.y - ac.y;
+  if (Math.abs(dx) >= Math.abs(dy) * 0.8) {
+    const x1 = ac.x + (Math.sign(dx || 1) * a.width) / 2,
+      x2 = bc.x - Math.sign(dx || 1) * (b.width / 2 + 5),
+      bend = Math.max(45, Math.abs(x2 - x1) * 0.5);
+    return `M${x1},${ac.y} C${x1 + Math.sign(dx || 1) * bend},${ac.y} ${x2 - Math.sign(dx || 1) * bend},${bc.y} ${x2},${bc.y}`;
+  }
+  const y1 = ac.y + (Math.sign(dy) * objectHeight(a)) / 2,
+    y2 = bc.y - Math.sign(dy) * (objectHeight(b) / 2 + 5),
+    bend = Math.max(45, Math.abs(y2 - y1) * 0.5);
+  return `M${ac.x},${y1} C${ac.x},${y1 + Math.sign(dy) * bend} ${bc.x},${y2 - Math.sign(dy) * bend} ${bc.x},${y2}`;
+}
+
+export function validateMap(input: unknown): VisionMap {
+  const m = input as VisionMap;
+  if (
+    !m ||
+    m.version !== 1 ||
+    typeof m.title !== 'string' ||
+    typeof m.anchorId !== 'string' ||
+    !Array.isArray(m.objects) ||
+    !Array.isArray(m.relationships)
+  )
+    throw new Error('Choose a valid SPREAD map.');
+  const ids = new Set<string>(),
+    seedIds = new Set<string>(),
+    edgeIds = new Set<string>();
+  for (const o of m.objects) {
+    if (
+      !o ||
+      typeof o.id !== 'string' ||
+      !o.id ||
+      ids.has(o.id) ||
+      !['NODE', 'SEED_BOX', 'IMAGINATION'].includes(o.type) ||
+      !['NORMAL', 'GOAL'].includes(o.role) ||
+      typeof o.text !== 'string' ||
+      typeof o.note !== 'string' ||
+      ![
+        o.x,
+        o.y,
+        o.width,
+        o.height,
+        o.focal,
+        o.shuffle,
+        o.createdAt,
+        o.updatedAt,
+      ].every(Number.isFinite) ||
+      o.width < 100 ||
+      o.width > 10000 ||
+      o.height < 1 ||
+      !Array.isArray(o.images) ||
+      o.images.some((id) => typeof id !== 'string') ||
+      new Set(o.images).size !== o.images.length ||
+      !Array.isArray(o.seeds) ||
+      o.seeds.length > 30
+    )
+      throw new Error('This map contains an invalid object.');
+    if (
+      (o.type === 'NODE' && o.images.length > 1) ||
+      (o.type === 'SEED_BOX' && o.images.length) ||
+      (o.type !== 'SEED_BOX' && o.seeds.length) ||
+      (o.type !== 'NODE' && o.role !== 'NORMAL')
+    )
+      throw new Error('This map violates object content rules.');
+    if (![10, 20, 30].includes(o.tier) || o.seeds.length > o.tier)
+      throw new Error('This Seed Box has an invalid capacity.');
+    for (const seed of o.seeds) {
+      if (
+        !seed ||
+        typeof seed.id !== 'string' ||
+        !seed.id ||
+        seedIds.has(seed.id) ||
+        typeof seed.text !== 'string' ||
+        !seed.text.trim() ||
+        !Number.isFinite(seed.visualSeed)
+      )
+        throw new Error('This map contains an invalid seed.');
+      seedIds.add(seed.id);
+    }
+    ids.add(o.id);
+  }
+  let checked = { ...m, relationships: [] as Relationship[] };
+  for (const e of m.relationships) {
+    if (
+      !e ||
+      typeof e.id !== 'string' ||
+      !e.id ||
+      edgeIds.has(e.id) ||
+      !['PATH', 'RELATED', 'REFERENCE'].includes(e.type)
+    )
+      throw new Error('This map contains an invalid relationship.');
+    checked = connect(checked, e.sourceId, e.targetId, e.type);
+    edgeIds.add(e.id);
+  }
+  for (const o of m.objects)
+    if (
+      o.attachment &&
+      !m.relationships.some(
+        (e) =>
+          e.id === o.attachment && e.targetId === o.id && e.type === 'PATH',
+      )
+    )
+      throw new Error('This map contains an invalid branch attachment.');
+  if (m.anchorId && !ids.has(m.anchorId))
+    throw new Error('This map is missing its spatial anchor.');
+  return m;
+}
