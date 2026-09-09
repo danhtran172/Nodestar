@@ -851,7 +851,7 @@ textarea:focus-visible {
 }
 .connect-dot {
   position: absolute;
-  right: -13px;
+  right: -17px;
   bottom: 13px;
   display: grid;
   width: 26px;
@@ -861,12 +861,20 @@ textarea:focus-visible {
   border-radius: 50%;
   color: #4568b9;
   background: white;
-  opacity: 0;
   transition: opacity .15s;
 }
-.canvas-object:hover .connect-dot,
-.canvas-object.selected .connect-dot,
-.connect-dot:focus-visible { opacity: 1; }
+.connect-dot.left { left: -17px; right: auto; }
+.connect-dot:focus-visible { outline: 2px solid #4568b9; outline-offset: 2px; }
+.semantic-slot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #498873;
+  border-radius: 50%;
+  background: #f2faf5;
+  box-shadow: 0 0 0 6px #49887318;
+  pointer-events: none;
+}
 .object-context-menu {
   position: fixed;
   z-index: 50;

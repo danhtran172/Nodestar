@@ -105,6 +105,7 @@ type Gesture = {
   branch: boolean;
   candidate?: string;
   candidateSince?: number;
+  candidateSlot?: { id: string; side: 'left' | 'right'; x: number; y: number };
 };
 
 function InlineText({
@@ -168,6 +169,7 @@ const Card = memo(function Card({
   onSeed,
   onOpen,
   onStartConnection,
+  relationSide,
 }: {
   object: CanvasObject;
   assets: Props['assets'];
@@ -180,6 +182,7 @@ const Card = memo(function Card({
   onSeed: Props['onSeed'];
   onOpen: Props['onOpen'];
   onStartConnection: Props['onStartConnection'];
+  relationSide?: 'left' | 'right';
 }) {
   recordObjectRender();
   const images = o.images.map((id) => assets[id]);
@@ -289,10 +292,7 @@ const Card = memo(function Card({
       )}
       {o.type === 'IMAGINATION' &&
         (images.length ? (
-          <div
-            className={`image-grid count-${Math.min(images.length, 6)} ${imageShape}`}
-            onDoubleClick={() => onOpen(o.id)}
-          >
+          <div className={`image-grid count-${Math.min(images.length, 6)} ${imageShape}`}>
             {images.slice(0, 6).map((a, i) => (
               <div className="image-slot" key={o.images[i]}>
                 <img
@@ -342,14 +342,14 @@ const Card = memo(function Card({
           className="resize-grip"
         />
       )}
-      <button
-        className="connect-dot"
+      {relationSide && <button
+        className={`connect-dot ${relationSide}`}
         title="Start a relationship"
         aria-label={`Start a relationship from ${o.text || 'this object'}`}
         onClick={() => onStartConnection(o.id)}
       >
         <Link2 size={13} />
-      </button>
+      </button>}
     </>
   );
 }, (previous, next) =>
@@ -392,7 +392,9 @@ export function SpreadCanvas(p: Props) {
     [invalid, setInvalid] = useState(''),
     [target, setTarget] = useState(''),
     [marquee, setMarquee] = useState<{ start: Point; end: Point } | null>(null),
-    [context, setContext] = useState<{ id: string; x: number; y: number } | null>(null);
+    [context, setContext] = useState<{ id: string; x: number; y: number } | null>(null),
+    [relationDot, setRelationDot] = useState<{ id: string; side: 'left' | 'right' } | null>(null),
+    [candidateSlot, setCandidateSlot] = useState<{ id: string; side: 'left' | 'right'; x: number; y: number } | null>(null);
   const viewRef = useRef(p.viewport);
   viewRef.current = p.viewport;
   const display = preview || p.map;
@@ -470,6 +472,7 @@ export function SpreadCanvas(p: Props) {
         setLive(null);
         setMarquee(null);
         setTarget('');
+        setCandidateSlot(null);
       }
     };
     const up = (e: KeyboardEvent) => {
@@ -482,6 +485,7 @@ export function SpreadCanvas(p: Props) {
       gesture.current = null;
       setLive(null);
       setMarquee(null);
+      setCandidateSlot(null);
       pointers.current.clear();
     };
     window.addEventListener('keydown', down);
@@ -652,10 +656,12 @@ export function SpreadCanvas(p: Props) {
       setLive(
         patchObject(g.base, g.id, {
           width,
-          height: Math.max(
-            o.type === 'SEED_BOX' ? 115 + o.seeds.length * 48 : 180,
-            o.height + delta.y,
-          ),
+          ...(o.type === 'NODE' ? {} : {
+            height: Math.max(
+              o.type === 'SEED_BOX' ? 132 + seedLayout(o).height : 180,
+              o.height + delta.y,
+            ),
+          }),
         }),
       );
       return;
@@ -687,28 +693,40 @@ export function SpreadCanvas(p: Props) {
       return;
     }
     const draggedObject = g.base.objects.find((object) => object.id === g.id);
-    // A relationship only settles after the dragged node has rested close to a
-    // target side. Passing over an object must never re-parent a branch.
-    const closeToTarget = hit &&
-      (Math.abs(pt.x - hit.x) < 44 || Math.abs(pt.x - (hit.x + hit.width)) < 44 ||
-        Math.abs(pt.y - hit.y) < 44 || Math.abs(pt.y - (hit.y + objectHeight(hit))) < 44);
-    if (closeToTarget && g.candidate !== hit?.id) {
-      g.candidate = hit?.id;
+    // Semantic reparenting lives in a slot outside the target. Traversing a
+    // target body is deliberately ignored, so an overlap is always transit.
+    const slots = g.base.objects
+      .filter((object) => object.id !== g.id && object.type === 'NODE')
+      .flatMap((object) => [
+        { id: object.id, side: 'left' as const, x: object.x - 34, y: object.y + objectHeight(object) / 2 },
+        { id: object.id, side: 'right' as const, x: object.x + object.width + 34, y: object.y + objectHeight(object) / 2 },
+      ]);
+    const near = slots
+      .map((slot) => ({ slot, distance: Math.hypot(pt.x - slot.x, pt.y - slot.y) }))
+      .sort((a, b) => a.distance - b.distance)[0];
+    const retained = g.candidateSlot && Math.hypot(pt.x - g.candidateSlot.x, pt.y - g.candidateSlot.y) < 64
+      ? g.candidateSlot
+      : undefined;
+    const nextSlot = retained || (near && near.distance < 38 ? near.slot : undefined);
+    if (nextSlot && g.candidate !== nextSlot.id) {
+      g.candidate = nextSlot.id;
+      g.candidateSlot = nextSlot;
       g.candidateSince = performance.now();
     }
-    if (!closeToTarget) {
+    if (!nextSlot) {
       g.candidate = undefined;
+      g.candidateSlot = undefined;
       g.candidateSince = undefined;
     }
+    setCandidateSlot(nextSlot || null);
     const semanticTarget =
-      g.branch &&
-      hit &&
-      g.candidate === hit.id &&
-      performance.now() - (g.candidateSince || performance.now()) >= 180 &&
+      nextSlot &&
+      g.candidate === nextSlot.id &&
+      performance.now() - (g.candidateSince || performance.now()) >= 120 &&
       !g.explicit &&
       draggedObject?.type === 'NODE' &&
-      hit.type === 'NODE'
-        ? hit
+      g.base.objects.find((object) => object.id === nextSlot.id)?.type === 'NODE'
+        ? g.base.objects.find((object) => object.id === nextSlot.id)
         : undefined;
     setTarget(semanticTarget?.id || '');
     const result = predictiveLayout({
@@ -782,9 +800,7 @@ export function SpreadCanvas(p: Props) {
           return;
         const id = el.closest<HTMLElement>('[data-object]')?.dataset.object;
         if (id) {
-          const o = p.map.objects.find((o) => o.id === id);
-          if (o?.type === 'NODE') p.onEdit(id);
-          else p.onOpen(id);
+          p.onEdit(id);
         } else p.onCreate(world({ x: e.clientX, y: e.clientY }));
       }}
       onContextMenu={(e) => {
@@ -951,6 +967,11 @@ export function SpreadCanvas(p: Props) {
                 p.onSelect(new Set([o.id]));
               }
             }}
+            onPointerEnter={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              setRelationDot({ id: o.id, side: e.clientX < rect.left + rect.width / 2 ? 'left' : 'right' });
+            }}
+            onPointerLeave={() => setRelationDot((current) => current?.id === o.id ? null : current)}
             className={`canvas-object ${o.type.toLowerCase()} ${o.role.toLowerCase()} ${p.selected.has(o.id) ? 'selected' : ''} ${target === o.id ? (invalid ? 'invalid-target' : 'drop-target') : ''} ${preview && gesture.current?.ids.has(o.id) ? 'dragging' : ''}`}
             style={
               {
@@ -975,6 +996,7 @@ export function SpreadCanvas(p: Props) {
               onSeed={p.onSeed}
               onOpen={p.onOpen}
               onStartConnection={p.onStartConnection}
+              relationSide={relationDot?.id === o.id ? relationDot.side : undefined}
             />
           </div>
         ))}
@@ -987,6 +1009,13 @@ export function SpreadCanvas(p: Props) {
               width: Math.abs(marquee.start.x - marquee.end.x),
               height: Math.abs(marquee.start.y - marquee.end.y),
             }}
+          />
+        )}
+        {candidateSlot && (
+          <span
+            className="semantic-slot"
+            style={{ left: candidateSlot.x - 9, top: candidateSlot.y - 9 }}
+            aria-label="Potential semantic drop location"
           />
         )}
       </div>
