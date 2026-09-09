@@ -95,10 +95,22 @@ export function useWorkspace() {
       } catch {
         /* Try database without overwriting the recovery copy. */
       }
-      const [mapResult, assetResult, catalogResult] = await Promise.allSettled([
-        loadMap(),
-        loadAssets(),
-        loadMapCatalog(),
+      const [mapResult, assetResult, catalogResult] = await Promise.race([
+        Promise.allSettled([
+          loadMap(),
+          loadAssets(),
+          loadMapCatalog(),
+        ]),
+        new Promise<PromiseSettledResult<unknown>[]>((resolve) =>
+          window.setTimeout(
+            () => resolve([
+              { status: 'rejected', reason: new Error('Map storage did not respond.') },
+              { status: 'rejected', reason: new Error('Asset storage did not respond.') },
+              { status: 'rejected', reason: new Error('Map catalog storage did not respond.') },
+            ]),
+            1500,
+          ),
+        ),
       ]);
       if (!live) return;
       let databaseSnapshot = null;
@@ -114,7 +126,8 @@ export function useWorkspace() {
         }
       }
       assetStoreHealthy.current = assetResult.status === 'fulfilled';
-      if (assetResult.status === 'fulfilled') setAssets(assetResult.value);
+      if (assetResult.status === 'fulfilled')
+        setAssets(assetResult.value as Record<string, Asset>);
       const snapshot = chooseWorkspaceSnapshot(
         localSnapshot,
         databaseSnapshot,
@@ -156,7 +169,7 @@ export function useWorkspace() {
       if (assetResult.status === 'fulfilled') {
         const checked = quarantineMissingAssetReferences(
           loaded,
-          new Set(Object.keys(assetResult.value)),
+          new Set(Object.keys(assetResult.value as Record<string, Asset>)),
         );
         current.current = checked.map;
         setOrphanedAssets(checked.missing);
