@@ -12,6 +12,8 @@
 /coverage
 /evidence/playwright-report/
 /evidence/playwright-results/
+/evidence/performance-report/
+/evidence/performance-results/
 
 # next.js
 /.next/

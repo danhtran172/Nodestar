@@ -2,7 +2,7 @@
 /* oxlint-disable react/react-compiler -- Pointer transaction refs are read synchronously; the React compiler is not enabled. */
 /* oxlint-disable next/no-img-element -- Device-local images are already decoded and resized to thumbnails before rendering. */
 /* oxlint-disable jsx-a11y/prefer-tag-over-role, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex -- Spatial graph objects and SVG paths expose keyboard actions and accessible roles without invalid nested buttons. */
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, Profiler, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import {
   Plus,
@@ -27,7 +27,36 @@ import type { CanvasObject, VisionMap, Point } from '@/lib/graph';
 import type { Asset } from '@/lib/storage';
 import type { ImageRequestOrigin } from '@/lib/image-request';
 import { edgeOccluders } from '@/lib/edge-occlusion';
+import {
+  recordCanvasCommit,
+  recordEdgeRender,
+  recordObjectRender,
+} from '@/lib/performance-probe';
 const canvasOverlay = '[data-canvas-overlay]';
+const occlusionCellSize = 420;
+type OcclusionRect = { id: string; x: number; y: number; width: number; height: number };
+function indexOccluders(rects: readonly OcclusionRect[]) {
+  const cells = new Map<string, OcclusionRect[]>();
+  const key = (x: number, y: number) => `${x}:${y}`;
+  for (const rect of rects) {
+    for (let x = Math.floor(rect.x / occlusionCellSize); x <= Math.floor((rect.x + rect.width) / occlusionCellSize); x++)
+      for (let y = Math.floor(rect.y / occlusionCellSize); y <= Math.floor((rect.y + rect.height) / occlusionCellSize); y++)
+        cells.set(key(x, y), [...(cells.get(key(x, y)) || []), rect]);
+  }
+  return (path: string) => {
+    const values = path.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)?.map(Number);
+    if (!values || values.length !== 8) return [];
+    const left = Math.min(values[0], values[2], values[4], values[6]);
+    const right = Math.max(values[0], values[2], values[4], values[6]);
+    const top = Math.min(values[1], values[3], values[5], values[7]);
+    const bottom = Math.max(values[1], values[3], values[5], values[7]);
+    const found = new Set<OcclusionRect>();
+    for (let x = Math.floor(left / occlusionCellSize); x <= Math.floor(right / occlusionCellSize); x++)
+      for (let y = Math.floor(top / occlusionCellSize); y <= Math.floor(bottom / occlusionCellSize); y++)
+        for (const rect of cells.get(key(x, y)) || []) found.add(rect);
+    return [...found];
+  };
+}
 export type Viewport = Point & { zoom: number };
 type Props = {
   map: VisionMap;
@@ -145,6 +174,7 @@ const Card = memo(function Card({
   onSeed: Props['onSeed'];
   onOpen: Props['onOpen'];
 }) {
+  recordObjectRender();
   const images = o.images.map((id) => assets[id]);
   const layout = useMemo(() => seedLayout(o), [o]);
   return (
@@ -306,7 +336,29 @@ const Card = memo(function Card({
       )}
     </>
   );
-});
+}, (previous, next) =>
+  previous.object.type === next.object.type &&
+  previous.object.role === next.object.role &&
+  previous.object.text === next.object.text &&
+  previous.object.width === next.object.width &&
+  previous.object.height === next.object.height &&
+  previous.object.focal === next.object.focal &&
+  previous.object.shuffle === next.object.shuffle &&
+  previous.object.tier === next.object.tier &&
+  previous.object.images.length === next.object.images.length &&
+  previous.object.images.every((id, index) => id === next.object.images[index]) &&
+  previous.object.seeds.length === next.object.seeds.length &&
+  previous.object.seeds.every(
+    (seed, index) =>
+      seed.id === next.object.seeds[index]?.id &&
+      seed.text === next.object.seeds[index]?.text &&
+      seed.visualSeed === next.object.seeds[index]?.visualSeed,
+  ) &&
+  previous.assets === next.assets &&
+  previous.selected === next.selected &&
+  previous.editing === next.editing &&
+  previous.zoom === next.zoom,
+);
 export function SpreadCanvas(p: Props) {
   const root = useRef<HTMLDivElement>(null),
     gesture = useRef<Gesture | null>(null),
@@ -343,6 +395,7 @@ export function SpreadCanvas(p: Props) {
   );
   const edgeCovers = useMemo(() => {
     const index = new Map(display.objects.map((o) => [o.id, o]));
+    const candidatesFor = indexOccluders(occlusionRects);
     return new Map(
       display.relationships.map((edge) => {
         const a = index.get(edge.sourceId),
@@ -350,7 +403,7 @@ export function SpreadCanvas(p: Props) {
         return [
           edge.id,
           a && b
-            ? edgeOccluders(edgePath(a, b), occlusionRects, a.id, b.id)
+            ? edgeOccluders(edgePath(a, b), candidatesFor(edgePath(a, b)), a.id, b.id)
             : [],
         ];
       }),
@@ -655,6 +708,7 @@ export function SpreadCanvas(p: Props) {
     setMarquee(null);
   }
   return (
+    <Profiler id="spread-canvas" onRender={recordCanvasCommit}>
     <div
       ref={root}
       className={`canvas ${p.mode === 'pan' ? 'pan-mode' : ''} ${panning ? 'is-panning' : ''} ${p.connecting ? 'connect-mode' : ''} ${p.viewport.zoom < 0.45 ? 'far-zoom' : p.viewport.zoom < 0.7 ? 'medium-zoom' : ''}`}
@@ -744,6 +798,7 @@ export function SpreadCanvas(p: Props) {
             </marker>
           </defs>
           {display.relationships.map((e) => {
+            recordEdgeRender();
             const a = objectIndex.get(e.sourceId),
               b = objectIndex.get(e.targetId);
             if (!a || !b) return null;
@@ -896,5 +951,6 @@ export function SpreadCanvas(p: Props) {
       )}
       {p.children}
     </div>
+    </Profiler>
   );
 }

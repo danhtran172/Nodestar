@@ -569,6 +569,7 @@ export type PredictiveLayoutResult = {
   affectedObjectIds: Set<string>;
 };
 const layoutGap = 24;
+const collisionCellSize = 256;
 function overlaps(a: CanvasObject, b: CanvasObject) {
   return (
     a.x < b.x + b.width + layoutGap &&
@@ -577,6 +578,39 @@ function overlaps(a: CanvasObject, b: CanvasObject) {
     a.y + objectHeight(a) + layoutGap > b.y
   );
 }
+function collisionIndex(fixed: readonly CanvasObject[]) {
+  const cells = new Map<string, CanvasObject[]>();
+  const key = (x: number, y: number) => `${x}:${y}`;
+  for (const object of fixed) {
+    const left = Math.floor((object.x - layoutGap) / collisionCellSize);
+    const right = Math.floor(
+      (object.x + object.width + layoutGap) / collisionCellSize,
+    );
+    const top = Math.floor((object.y - layoutGap) / collisionCellSize);
+    const bottom = Math.floor(
+      (object.y + objectHeight(object) + layoutGap) / collisionCellSize,
+    );
+    for (let x = left; x <= right; x++)
+      for (let y = top; y <= bottom; y++) {
+        const current = cells.get(key(x, y));
+        if (current) current.push(object);
+        else cells.set(key(x, y), [object]);
+      }
+  }
+  return (object: CanvasObject) => {
+    const candidates = new Set<CanvasObject>();
+    const left = Math.floor(object.x / collisionCellSize);
+    const right = Math.floor((object.x + object.width) / collisionCellSize);
+    const top = Math.floor(object.y / collisionCellSize);
+    const bottom = Math.floor(
+      (object.y + objectHeight(object)) / collisionCellSize,
+    );
+    for (let x = left; x <= right; x++)
+      for (let y = top; y <= bottom; y++)
+        for (const candidate of cells.get(key(x, y)) || []) candidates.add(candidate);
+    return candidates;
+  };
+}
 function collisionFreeTranslation(
   map: VisionMap,
   movingIds: ReadonlySet<string>,
@@ -584,6 +618,7 @@ function collisionFreeTranslation(
 ) {
   const moving = map.objects.filter((object) => movingIds.has(object.id));
   const fixed = map.objects.filter((object) => !movingIds.has(object.id));
+  const candidatesFor = collisionIndex(fixed);
   const step = Math.max(
     36,
     ...moving.map((object) => objectHeight(object) + layoutGap),
@@ -595,7 +630,11 @@ function collisionFreeTranslation(
       x: object.x + delta.x,
       y: object.y + delta.y + offsetY,
     }));
-    if (!translated.some((object) => fixed.some((item) => overlaps(object, item)))) {
+    if (
+      !translated.some((object) =>
+        [...candidatesFor(object)].some((item) => overlaps(object, item)),
+      )
+    ) {
       const positions = new Map(translated.map((object) => [object.id, object]));
       return {
         ...map,

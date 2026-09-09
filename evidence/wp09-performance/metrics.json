@@ -1,0 +1,252 @@
+{
+  "100": {
+    "branchDrag": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 1,
+      "edgeRenders": 1210,
+      "layoutMs": 5.72,
+      "styleMs": 48.62
+    },
+    "explicitMultiDrag": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 1210,
+      "layoutMs": 2.19,
+      "styleMs": 5.89
+    },
+    "focus": {
+      "p95FrameMs": 16.7,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 1,
+      "edgeRenders": 220,
+      "layoutMs": 0.8,
+      "styleMs": 1.91
+    },
+    "imageNavigation": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 2860,
+      "layoutMs": 0.29,
+      "styleMs": 12.58
+    },
+    "validReparent": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 0,
+      "layoutMs": 0,
+      "styleMs": 0.11
+    },
+    "invalidReparent": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 0,
+      "layoutMs": 0,
+      "styleMs": 0
+    },
+    "pan": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 1540,
+      "layoutMs": 0,
+      "styleMs": 9.9
+    },
+    "zoom": {
+      "p95FrameMs": 16.7,
+      "maxFrameMs": 16.7,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 102,
+      "edgeRenders": 110,
+      "layoutMs": 1.95,
+      "styleMs": 2.7
+    }
+  },
+  "300": {
+    "branchDrag": {
+      "p95FrameMs": 50.1,
+      "maxFrameMs": 66.7,
+      "longTasks": [
+        52
+      ],
+      "maxReactCommitMs": 0,
+      "objectRenders": 1,
+      "edgeRenders": 3674,
+      "layoutMs": 33.05,
+      "styleMs": 171.67
+    },
+    "explicitMultiDrag": {
+      "p95FrameMs": 16.7,
+      "maxFrameMs": 33.4,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 3674,
+      "layoutMs": 6.03,
+      "styleMs": 6.31
+    },
+    "focus": {
+      "p95FrameMs": 16.7,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 1,
+      "edgeRenders": 668,
+      "layoutMs": 1.13,
+      "styleMs": 2.26
+    },
+    "imageNavigation": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 33.5,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 8684,
+      "layoutMs": 0.52,
+      "styleMs": 45.44
+    },
+    "validReparent": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 0,
+      "layoutMs": 0,
+      "styleMs": 0.11
+    },
+    "invalidReparent": {
+      "p95FrameMs": 16.7,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 0,
+      "layoutMs": 0,
+      "styleMs": 0
+    },
+    "pan": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 4676,
+      "layoutMs": 0,
+      "styleMs": 33.96
+    },
+    "zoom": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 33.3,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 306,
+      "edgeRenders": 334,
+      "layoutMs": 4.85,
+      "styleMs": 8.65
+    }
+  },
+  "500": {
+    "branchDrag": {
+      "p95FrameMs": 16.7,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 0,
+      "layoutMs": 0,
+      "styleMs": 12.4
+    },
+    "explicitMultiDrag": {
+      "p95FrameMs": 49.9,
+      "maxFrameMs": 66.6,
+      "longTasks": [
+        65
+      ],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 6138,
+      "layoutMs": 7.49,
+      "styleMs": 8.18
+    },
+    "focus": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 50,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 1,
+      "edgeRenders": 1116,
+      "layoutMs": 1.79,
+      "styleMs": 2.76
+    },
+    "imageNavigation": {
+      "p95FrameMs": 33.3,
+      "maxFrameMs": 50,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 14508,
+      "layoutMs": 0.77,
+      "styleMs": 61.8
+    },
+    "validReparent": {
+      "p95FrameMs": 16.7,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 0,
+      "layoutMs": 0,
+      "styleMs": 0.12
+    },
+    "invalidReparent": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 16.8,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 0,
+      "layoutMs": 0,
+      "styleMs": 0
+    },
+    "pan": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 33.2,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 0,
+      "edgeRenders": 7812,
+      "layoutMs": 0,
+      "styleMs": 55.24
+    },
+    "zoom": {
+      "p95FrameMs": 16.8,
+      "maxFrameMs": 83.4,
+      "longTasks": [],
+      "maxReactCommitMs": 0,
+      "objectRenders": 510,
+      "edgeRenders": 558,
+      "layoutMs": 8.12,
+      "styleMs": 12.77
+    }
+  }
+}
