@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
+  // Fixtures deliberately exercise one shared IndexedDB database name.
+  workers: 1,
   retries: 0,
   reporter: [['list'], ['html', { outputFolder: 'evidence/playwright-report' }]],
   outputDir: 'evidence/playwright-results',
