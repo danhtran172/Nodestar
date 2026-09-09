@@ -18,6 +18,8 @@ import {
   moveObjects,
   seedLayout,
   objectHeight,
+  imaginationDimensions,
+  seedCapacity,
 } from '../lib/graph.ts';
 
 test('a copied selection is a valid independent map', () => {
@@ -198,6 +200,20 @@ test('seed capacity promotion, transfer, and conversion preserve content', () =>
   const r = moveSeed(m, box.id, b.seeds[0].id, { x: 0, y: 300 });
   assert.equal(r.map.objects.find((o) => o.id === r.id).text, 'seed 0');
   assert.equal(r.map.objects.find((o) => o.id === box.id).seeds.length, 19);
+});
+test('seed capacity is derived from the actual seed count', () => {
+  assert.equal(seedCapacity(0), 5);
+  assert.equal(seedCapacity(5), 5);
+  assert.equal(seedCapacity(6), 10);
+  assert.equal(seedCapacity(10), 10);
+  assert.equal(seedCapacity(11), 20);
+  assert.equal(seedCapacity(20), 20);
+});
+test('Imagination growth preserves the selected base preset', () => {
+  assert.deepEqual(imaginationDimensions(1, 'small'), { width: 320, height: 240 });
+  assert.deepEqual(imaginationDimensions(2, 'small'), { width: 384, height: 288 });
+  assert.deepEqual(imaginationDimensions(2, 'large'), { width: 696, height: 456 });
+  assert.deepEqual(imaginationDimensions(8, 'medium'), { width: 770, height: 525 });
 });
 test('type restrictions and reference direction', () => {
   let m = setup();
