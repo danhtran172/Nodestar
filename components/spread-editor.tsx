@@ -3,7 +3,6 @@
 /* oxlint-disable next/no-img-element -- The explicit viewer renders a local original image rather than fetching or optimizing remotely. */
 /* oxlint-disable jsx-a11y/no-autofocus -- Seed creation is an explicit keyboard entry flow; focus returns through the dialog/popover primitive. */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
 import {
   Plus,
   MousePointer2,
@@ -759,83 +758,6 @@ export default function SpreadEditor() {
       window.removeEventListener('paste', paste);
     };
   });
-  const commandRef = useRef({ map, commit });
-  commandRef.current = { map, commit };
-  useEffect(() => {
-    const context = (
-      document as unknown as {
-        modelContext?: {
-          registerTool: (
-            tool: unknown,
-            options: { signal: AbortSignal },
-          ) => void;
-        };
-      }
-    ).modelContext;
-    if (!context) return;
-    const lifecycle = new AbortController();
-    try {
-      context.registerTool(
-        {
-          name: 'read_vision_map',
-          description:
-            'Read the current SPREAD map, including nodes and relationships.',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            additionalProperties: false,
-          },
-          annotations: { readOnlyHint: true, untrustedContentHint: true },
-          execute: () => commandRef.current.map,
-        },
-        { signal: lifecycle.signal },
-      );
-      context.registerTool(
-        {
-          name: 'create_vision_node',
-          description:
-            'Create an independent node or goal in the current SPREAD map. The creation is undoable.',
-          inputSchema: {
-            type: 'object',
-            properties: { text: { type: 'string' }, goal: { type: 'boolean' } },
-            required: ['text'],
-            additionalProperties: false,
-          },
-          annotations: { readOnlyHint: false, untrustedContentHint: true },
-          execute: (input: unknown) => {
-            const data = input as { text?: unknown; goal?: unknown };
-            if (
-              typeof data?.text !== 'string' ||
-              !data.text.trim() ||
-              (data.goal !== undefined && typeof data.goal !== 'boolean')
-            )
-              throw Error(
-                'Provide non-empty text and an optional boolean goal.',
-              );
-            if (!commandRef.current.map) throw Error('Map is still loading.');
-            const object = freePosition(
-              commandRef.current.map,
-              makeObject(
-                'NODE',
-                { x: 0, y: 0 },
-                data.goal ? 'GOAL' : 'NORMAL',
-                data.text.trim(),
-              ),
-            );
-            flushSync(() =>
-              commandRef.current.commit((m) => ({
-                ...m,
-                objects: [...m.objects, object],
-              })),
-            );
-            return { id: object.id, text: object.text, role: object.role };
-          },
-        },
-        { signal: lifecycle.signal },
-      );
-    } catch {}
-    return () => lifecycle.abort();
-  }, []);
   if (!map)
     return (
       <main className="spread-loading">

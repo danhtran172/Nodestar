@@ -47,4 +47,4 @@ Data belongs to the current browser profile and origin. There is no cross-device
 
 Automated domain tests cover graph constraints, reconnect-on-delete, branch reparenting, copying, seed capacity and conversion. TypeScript, production compilation and source lint checks are included. Generated UI primitives are excluded from application lint rather than altered. Local thumbnails and the spatial canvas have documented lint exceptions.
 
-Browser interaction, installability, offline reopen, and the 60 FPS target still require real-device acceptance testing. WebMCP is feature-detected; its runtime contract has not been verified in a supported browser context. Seed motion uses deterministic layout and a short gravity-like settle animation, rather than a general-purpose physics simulation.
+Browser interaction, installability, offline reopen, and the 60 FPS target still require real-device acceptance testing. Seed motion uses deterministic layout and a short gravity-like settle animation, rather than a general-purpose physics simulation.
