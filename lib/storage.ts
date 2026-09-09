@@ -1,4 +1,18 @@
 import type { WorkspaceSnapshot } from './workspace-snapshot';
+import type { VisionMap } from './graph';
+export type MapEntry = {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  archived: boolean;
+  map: VisionMap;
+};
+export type MapCatalog = {
+  version: 1;
+  activeId: string;
+  entries: MapEntry[];
+};
 export type Asset = {
   id: string;
   filename: string;
@@ -84,6 +98,20 @@ export async function loadMap(): Promise<unknown> {
     request.onsuccess = () => resolve(request.result || null);
     request.onerror = () => reject(request.error);
   });
+}
+export async function loadMapCatalog(): Promise<unknown> {
+  const database = await db();
+  return new Promise((resolve, reject) => {
+    const request = database
+      .transaction('maps')
+      .objectStore('maps')
+      .get('catalog');
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+export async function saveMapCatalog(catalog: MapCatalog) {
+  await put('maps', catalog, 'catalog');
 }
 export async function loadAssets(): Promise<Record<string, Asset>> {
   const database = await db();

@@ -9,7 +9,7 @@ import {
   Target,
   Sprout,
   Image as ImageIcon,
-  Grip,
+  Link2,
   ArrowUpRight,
 } from 'lucide-react';
 import {
@@ -68,6 +68,7 @@ type Props = {
   viewport: Viewport;
   setViewport: (v: Viewport) => void;
   mode: 'select' | 'pan';
+  theme?: 'paper' | 'night' | 'mist';
   connecting: string;
   editing: string;
   onText: (id: string, text: string, cancel?: boolean) => void;
@@ -79,6 +80,7 @@ type Props = {
   onEdit: (id: string) => void;
   onCreate: (p: Point) => void;
   onOpen: (id: string) => void;
+  onStartConnection: (id: string) => void;
   onSeed: (id: string) => void;
   onError: (s: string) => void;
   onFiles: (
@@ -89,7 +91,7 @@ type Props = {
   children?: React.ReactNode;
 };
 type Gesture = {
-  kind: 'pan' | 'move' | 'marquee' | 'seed' | 'resize';
+  kind: 'pan' | 'move' | 'marquee' | 'seed' | 'seed-convert' | 'resize';
   start: Point;
   screen: Point;
   base: VisionMap;
@@ -100,6 +102,9 @@ type Gesture = {
   moved: boolean;
   additive: boolean;
   explicit: boolean;
+  branch: boolean;
+  candidate?: string;
+  candidateSince?: number;
 };
 
 function InlineText({
@@ -162,6 +167,7 @@ const Card = memo(function Card({
   onBranch,
   onSeed,
   onOpen,
+  onStartConnection,
 }: {
   object: CanvasObject;
   assets: Props['assets'];
@@ -173,6 +179,7 @@ const Card = memo(function Card({
   onBranch: Props['onBranch'];
   onSeed: Props['onSeed'];
   onOpen: Props['onOpen'];
+  onStartConnection: Props['onStartConnection'];
 }) {
   recordObjectRender();
   const images = o.images.map((id) => assets[id]);
@@ -196,16 +203,12 @@ const Card = memo(function Card({
       )}
       {o.type === 'SEED_BOX' && (
         <div className="object-label">
-          <Sprout size={17} /> SEED BOX{' '}
-          <span>
-            {o.seeds.length}/{o.tier}
-          </span>
+          <Sprout size={17} /> Seed Box
         </div>
       )}
       {o.type === 'IMAGINATION' && (
         <div className="object-label">
-          <ImageIcon size={17} /> IMAGINATION{' '}
-          <span>{o.images.length || ''}</span>
+          <ImageIcon size={17} /> Imagination
         </div>
       )}
       <div className="node-content">
@@ -227,6 +230,9 @@ const Card = memo(function Card({
           <div className="object-text">{o.text || 'New idea'}</div>
         )}
       </div>
+      {o.type === 'NODE' && o.note && (
+        <div className="object-note">{o.note}</div>
+      )}
       {o.type === 'SEED_BOX' && (
         <>
           <div
@@ -259,6 +265,14 @@ const Card = memo(function Card({
                   }}
                 >
                   {s.text}
+                  <span
+                    data-seed-convert="true"
+                    className="seed-convert"
+                    title="Drag this handle out to turn the seed into a node"
+                    aria-label={`Drag ${s.text} out to turn it into a node`}
+                  >
+                    <ArrowUpRight size={12} />
+                  </span>
                 </div>
               ),
             )}
@@ -266,11 +280,11 @@ const Card = memo(function Card({
           <button
             className="box-add"
             title={
-              o.seeds.length >= 30
-                ? 'Maximum 30 seeds in this Seed Box.'
+              o.seeds.length >= 20
+                ? 'Maximum 20 seeds in this Seed Box.'
                 : 'Add seed'
             }
-            disabled={o.seeds.length >= 30}
+            disabled={o.seeds.length >= 20}
             onClick={() => onSeed(o.id)}
           >
             <Plus size={17} />
@@ -324,16 +338,22 @@ const Card = memo(function Card({
           <Plus size={18} />
         </button>
       )}
-      {selected && (
+      {o.type !== 'IMAGINATION' && selected && (
         <span
           role="separator"
           aria-label="Resize object using drag, or open details for keyboard resizing"
           data-resize="true"
           className="resize-grip"
-        >
-          <Grip size={13} />
-        </span>
+        />
       )}
+      <button
+        className="connect-dot"
+        title="Start a relationship"
+        aria-label={`Start a relationship from ${o.text || 'this object'}`}
+        onClick={() => onStartConnection(o.id)}
+      >
+        <Link2 size={13} />
+      </button>
     </>
   );
 }, (previous, next) =>
@@ -343,6 +363,7 @@ const Card = memo(function Card({
   previous.object.width === next.object.width &&
   previous.object.height === next.object.height &&
   previous.object.focal === next.object.focal &&
+  previous.object.note === next.object.note &&
   previous.object.shuffle === next.object.shuffle &&
   previous.object.tier === next.object.tier &&
   previous.object.images.length === next.object.images.length &&
@@ -374,7 +395,8 @@ export function SpreadCanvas(p: Props) {
   const [preview, setPreview] = useState<VisionMap | null>(null),
     [invalid, setInvalid] = useState(''),
     [target, setTarget] = useState(''),
-    [marquee, setMarquee] = useState<{ start: Point; end: Point } | null>(null);
+    [marquee, setMarquee] = useState<{ start: Point; end: Point } | null>(null),
+    [context, setContext] = useState<{ id: string; x: number; y: number } | null>(null);
   const viewRef = useRef(p.viewport);
   viewRef.current = p.viewport;
   const display = preview || p.map;
@@ -536,12 +558,14 @@ export function SpreadCanvas(p: Props) {
     let ids = new Set<string>();
     let gestureExplicit = false;
     if (!pan && objId) {
+      const branchDrag = e.shiftKey && !(e.ctrlKey || e.metaKey);
       const plan = pointerSelectionPlan(
         p.map,
         p.selected,
         p.explicit,
         objId,
         e.ctrlKey || e.metaKey,
+        branchDrag,
       );
       p.onSelect(plan.visibleSelection, plan.explicit);
       if (!plan.startDrag) return;
@@ -553,6 +577,8 @@ export function SpreadCanvas(p: Props) {
         ? 'pan'
         : el.closest('[data-resize]')
           ? 'resize'
+          : el.closest('[data-seed-convert]')
+            ? 'seed-convert'
           : el.closest('[data-seed]')
             ? 'seed'
             : objId
@@ -568,6 +594,7 @@ export function SpreadCanvas(p: Props) {
       moved: false,
       additive: e.shiftKey,
       explicit: gestureExplicit,
+      branch: e.shiftKey && !(e.ctrlKey || e.metaKey),
     };
     if (!pan && !objId && !e.shiftKey) p.onSelect(new Set());
   }
@@ -648,6 +675,13 @@ export function SpreadCanvas(p: Props) {
           pt.y <= o.y + objectHeight(o) + 14,
       );
     if (g.kind === 'seed') {
+      // Rearranging a loose idea stays inside its box. It deliberately does
+      // not create a node; conversion is only available from the arrow handle.
+      setTarget('');
+      setLive(g.base);
+      return;
+    }
+    if (g.kind === 'seed-convert') {
       setTarget(hit?.id || '');
       try {
         setLive(moveSeed(g.base, g.id, g.seed!, pt, hit?.id).map);
@@ -657,8 +691,27 @@ export function SpreadCanvas(p: Props) {
       return;
     }
     const draggedObject = g.base.objects.find((object) => object.id === g.id);
+    // A relationship only settles after the dragged node has rested close to a
+    // target side. Passing over an object must never re-parent a branch.
+    const closeToTarget = hit &&
+      (Math.abs(pt.x - hit.x) < 44 || Math.abs(pt.x - (hit.x + hit.width)) < 44 ||
+        Math.abs(pt.y - hit.y) < 44 || Math.abs(pt.y - (hit.y + objectHeight(hit))) < 44);
+    if (closeToTarget && g.candidate !== hit?.id) {
+      g.candidate = hit?.id;
+      g.candidateSince = performance.now();
+    }
+    if (!closeToTarget) {
+      g.candidate = undefined;
+      g.candidateSince = undefined;
+    }
     const semanticTarget =
-      hit && !g.explicit && draggedObject?.type === 'NODE' && hit.type === 'NODE'
+      g.branch &&
+      hit &&
+      g.candidate === hit.id &&
+      performance.now() - (g.candidateSince || performance.now()) >= 180 &&
+      !g.explicit &&
+      draggedObject?.type === 'NODE' &&
+      hit.type === 'NODE'
         ? hit
         : undefined;
     setTarget(semanticTarget?.id || '');
@@ -684,18 +737,18 @@ export function SpreadCanvas(p: Props) {
     gesture.current = null;
     if (e.button === 2 && rightPress.current?.id && !g?.moved) {
       p.onSelect(new Set([rightPress.current.id]));
-      p.onOpen(rightPress.current.id);
+      setContext({ id: rightPress.current.id, x: e.clientX, y: e.clientY });
     }
     rightPress.current = null;
     if (g?.moved && previewRef.current && g.base === p.map) {
       if (invalidRef.current) p.onError(invalidRef.current);
       else {
         let next = previewRef.current;
-        if (g.kind === 'move')
+        if (g.kind === 'move' || g.kind === 'seed')
           next = {
             ...next,
             objects: next.objects.map((o) =>
-              g.ids.has(o.id) && o.type === 'SEED_BOX'
+              (g.ids.has(o.id) || o.id === g.id) && o.type === 'SEED_BOX'
                 ? { ...o, shuffle: nextVisualShuffle(o.shuffle) }
                 : o,
             ),
@@ -711,7 +764,7 @@ export function SpreadCanvas(p: Props) {
     <Profiler id="spread-canvas" onRender={recordCanvasCommit}>
     <div
       ref={root}
-      className={`canvas ${p.mode === 'pan' ? 'pan-mode' : ''} ${panning ? 'is-panning' : ''} ${p.connecting ? 'connect-mode' : ''} ${p.viewport.zoom < 0.45 ? 'far-zoom' : p.viewport.zoom < 0.7 ? 'medium-zoom' : ''}`}
+      className={`canvas canvas-theme-${p.theme || 'paper'} ${p.mode === 'pan' ? 'pan-mode' : ''} ${panning ? 'is-panning' : ''} ${p.connecting ? 'connect-mode' : ''} ${p.viewport.zoom < 0.45 ? 'far-zoom' : p.viewport.zoom < 0.7 ? 'medium-zoom' : ''}`}
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}
@@ -758,10 +811,10 @@ export function SpreadCanvas(p: Props) {
         }
       }}
     >
-      <div className="canvas-heading">
+      {display.objects.length === 0 && <div className="canvas-heading">
         <span className="eyebrow">YOUR VISION, UNFOLDING</span>
         <p>A little space for what comes next.</p>
-      </div>
+      </div>}
       <div
         className="world"
         style={{
@@ -925,6 +978,7 @@ export function SpreadCanvas(p: Props) {
               onBranch={p.onBranch}
               onSeed={p.onSeed}
               onOpen={p.onOpen}
+              onStartConnection={p.onStartConnection}
             />
           </div>
         ))}
@@ -947,6 +1001,17 @@ export function SpreadCanvas(p: Props) {
               <ArrowUpRight size={15} /> Release to connect here
             </>
           )}
+        </div>
+      )}
+      {context && (
+        <div
+          data-canvas-overlay
+          className="object-context-menu"
+          style={{ left: context.x, top: context.y }}
+        >
+          <button onClick={() => { p.onEdit(context.id); setContext(null); }}>Edit title</button>
+          <button onClick={() => { p.onOpen(context.id); setContext(null); }}>Details</button>
+          <button onClick={() => { p.onStartConnection(context.id); setContext(null); }}>Connect</button>
         </div>
       )}
       {p.children}

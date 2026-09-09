@@ -93,6 +93,7 @@ import {
   moveObjects,
   validateMap,
   nextVisualShuffle,
+  imaginationDimensions,
 } from '@/lib/graph';
 import type { VisionMap, CanvasObject, Kind, Point } from '@/lib/graph';
 import { processImage, saveAsset } from '@/lib/storage';
@@ -138,15 +139,19 @@ function applyImageReference(map: VisionMap, request: PendingImageRequest) {
     next = { ...map, objects: [...map.objects, target] };
   }
   if (!target) throw new Error('The image target no longer exists.');
+  const images =
+    target.type === 'NODE'
+      ? [request.asset.id]
+      : request.replaceId
+        ? target.images.flatMap((id) =>
+            id === request.replaceId ? [request.asset.id] : [id],
+          )
+        : [...target.images, request.asset.id];
   return patchObject(next, target.id, {
-    images:
-      target.type === 'NODE'
-        ? [request.asset.id]
-        : request.replaceId
-          ? target.images.flatMap((id) =>
-              id === request.replaceId ? [request.asset.id] : [id],
-            )
-          : [...target.images, request.asset.id],
+    images,
+    ...(target.type === 'IMAGINATION'
+      ? imaginationDimensions(images.length)
+      : {}),
   });
 }
 export default function SpreadEditor() {
@@ -172,7 +177,9 @@ export default function SpreadEditor() {
     [seedText, setSeedText] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Set<string> | null>(null),
     [help, setHelp] = useState(false),
-    [viewer, setViewer] = useState('');
+    [viewer, setViewer] = useState(''),
+    [allMaps, setAllMaps] = useState(false),
+    [theme, setTheme] = useState<'paper' | 'night' | 'mist'>('paper');
   const [online, setOnline] = useState(true),
     [busy, setBusy] = useState(false),
     [pendingImages, setPendingImages] = useState<
@@ -285,6 +292,16 @@ export default function SpreadEditor() {
     }
   }, [viewport]);
   useEffect(() => {
+    try {
+      const stored = localStorage.getItem('spread-canvas-theme');
+      if (stored === 'paper' || stored === 'mist' || stored === 'night')
+        setTheme(stored);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('spread-canvas-theme', theme); } catch {}
+  }, [theme]);
+  useEffect(() => {
     const change = () => setOnline(navigator.onLine);
     change();
     window.addEventListener('online', change);
@@ -304,6 +321,39 @@ export default function SpreadEditor() {
   }, []);
   function patch(id: string, changes: Partial<CanvasObject>) {
     commit((m) => patchObject(m, id, changes));
+  }
+  function newMap() {
+    ws.createMap({
+      ...map!,
+      title: 'Untitled vision',
+      anchorId: '',
+      objects: [],
+      relationships: [],
+    });
+    setSelected(new Set());
+    setFocus('');
+    setDetail('');
+    fit([]);
+    notify('New map created. Your previous map is still in All Maps.');
+  }
+  function duplicateMap(id: string) {
+    const source = ws.maps.find((entry) => entry.id === id);
+    if (!source) return;
+    const ids = new Map(source.map.objects.map((object) => [object.id, crypto.randomUUID()]));
+    ws.createMap({
+      ...source.map,
+      title: `${source.title} copy`,
+      objects: source.map.objects.map((object) => ({ ...object, id: ids.get(object.id)! })),
+      relationships: source.map.relationships.map((relationship) => ({
+        ...relationship,
+        id: crypto.randomUUID(),
+        sourceId: ids.get(relationship.sourceId)!,
+        targetId: ids.get(relationship.targetId)!,
+      })),
+      anchorId: ids.get(source.map.anchorId) || '',
+    });
+    setAllMaps(false);
+    notify('Map duplicated.');
   }
   function beginNew(
     type: Kind,
@@ -781,23 +831,13 @@ export default function SpreadEditor() {
               <ChevronDown size={15} />
             </DropdownMenuTrigger>
             <DropdownMenuContent className="spread-menu">
+              <DropdownMenuItem onClick={() => setAllMaps(true)}>
+                <Network /> All Maps
+              </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => {
-                  commit((m) => ({
-                    ...m,
-                    title: 'Untitled vision',
-                    anchorId: '',
-                    objects: [],
-                    relationships: [],
-                  }));
-                  setSelected(new Set());
-                  setFocus('');
-                  setDetail('');
-                  fit([]);
-                  notify('New canvas. Undo to return to your previous map.');
-                }}
+                onClick={newMap}
               >
-                <FilePlus2 /> New canvas
+                <FilePlus2 /> New map
               </DropdownMenuItem>
               <DropdownMenuItem onClick={exportMap}>
                 <Download /> Export backup
@@ -806,6 +846,9 @@ export default function SpreadEditor() {
                 <Upload /> Restore backup
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setTheme(theme === 'paper' ? 'mist' : theme === 'mist' ? 'night' : 'paper')}>
+                <Circle /> Canvas Theme · {theme === 'paper' ? 'Paper' : theme === 'mist' ? 'Mist' : 'Night'}
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setHelp(true)}>
                 <Keyboard /> Keyboard shortcuts
               </DropdownMenuItem>
@@ -824,7 +867,7 @@ export default function SpreadEditor() {
             key={map.title}
             onBlur={(e) => {
               if (e.target.value.trim() && e.target.value !== map.title)
-                commit((m) => ({ ...m, title: e.target.value.trim() }));
+                ws.renameMap(ws.activeMapId, e.target.value.trim());
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.currentTarget.blur();
@@ -867,6 +910,7 @@ export default function SpreadEditor() {
           viewport={viewport}
           setViewport={setViewport}
           mode={mode}
+          theme={theme}
           connecting={connecting}
           editing={editing}
           onText={saveText}
@@ -886,6 +930,12 @@ export default function SpreadEditor() {
           onEdit={setEditing}
           onCreate={(p) => beginNew('NODE', 'NORMAL', p)}
           onOpen={setDetail}
+          onStartConnection={(id) => {
+            setSelected(new Set([id]));
+            setExplicit(false);
+            setDetail('');
+            setConnecting(id);
+          }}
           onSeed={(id) => {
             setSeedBox(id);
             setSeedText('');
@@ -1225,6 +1275,46 @@ export default function SpreadEditor() {
             </button>
           </div>
         </SpreadCanvas>
+        <Dialog open={allMaps} onOpenChange={setAllMaps}>
+          <DialogContent className="all-maps-dialog">
+            <DialogTitle>All Maps</DialogTitle>
+            <DialogDescription>
+              Create, switch, rename, duplicate, archive, or delete a map on this device.
+            </DialogDescription>
+            <div className="all-maps-list">
+              {ws.maps.map((entry) => (
+                <div className={`map-row ${entry.id === ws.activeMapId ? 'active' : ''} ${entry.archived ? 'archived' : ''}`} key={entry.id}>
+                  <button
+                    className="map-row-open"
+                    disabled={entry.archived}
+                    onClick={() => {
+                      ws.selectMap(entry.id);
+                      setSelected(new Set());
+                      setDetail('');
+                      setAllMaps(false);
+                    }}
+                  >
+                    <strong>{entry.title}</strong>
+                    <small>{entry.map.objects.length} objects · {entry.archived ? 'Archived' : entry.id === ws.activeMapId ? 'Open now' : 'Open map'}</small>
+                  </button>
+                  <input
+                    aria-label={`Rename ${entry.title}`}
+                    defaultValue={entry.title}
+                    key={`${entry.id}-${entry.title}`}
+                    onBlur={(e) => ws.renameMap(entry.id, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  />
+                  <button title="Duplicate map" aria-label={`Duplicate ${entry.title}`} onClick={() => duplicateMap(entry.id)}><Copy size={15} /></button>
+                  <button title={entry.archived ? 'Restore map' : 'Archive map'} aria-label={`${entry.archived ? 'Restore' : 'Archive'} ${entry.title}`} onClick={() => ws.archiveMap(entry.id, !entry.archived)}><ArrowLeftRight size={15} /></button>
+                  <button title="Delete map" aria-label={`Delete ${entry.title}`} disabled={ws.maps.length === 1} onClick={() => {
+                    if (window.confirm(`Delete “${entry.title}”? This cannot be undone.`)) ws.deleteMap(entry.id);
+                  }}><Trash2 size={15} /></button>
+                </div>
+              ))}
+            </div>
+            <button className="primary-button" onClick={newMap}><FilePlus2 size={16} /> New map</button>
+          </DialogContent>
+        </Dialog>
         <ObjectDetails
           object={map.objects.find((o) => o.id === detail) || null}
           assets={assets}

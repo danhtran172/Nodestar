@@ -46,13 +46,18 @@ const map = {
   ],
 };
 
-test('single-clicking a non-leaf node selects only the clicked node', () => {
+test('normal node drag selects and moves only the clicked node', () => {
   const plan = pointerSelectionPlan(map, new Set(), false, 'a', false);
   assert.deepEqual([...plan.clickedSelection], ['a']);
   assert.deepEqual([...plan.visibleSelection], ['a']);
-  assert.deepEqual([...plan.movementIds], ['a', 'b', 'c']);
+  assert.deepEqual([...plan.movementIds], ['a']);
   assert.equal(plan.explicit, false);
   assert.equal(plan.startDrag, true);
+});
+
+test('shift drag moves the downstream PATH branch', () => {
+  const plan = pointerSelectionPlan(map, new Set(), false, 'a', false, true);
+  assert.deepEqual([...plan.movementIds], ['a', 'b', 'c']);
 });
 
 test('single-clicking non-node objects selects and moves exactly one object', () => {

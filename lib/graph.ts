@@ -48,20 +48,29 @@ export function makeObject(
     text,
     note: '',
     ...p,
-    width: type === 'NODE' ? (role === 'GOAL' ? 280 : 210) : 310,
+    width:
+      type === 'NODE' ? (role === 'GOAL' ? 280 : 210) :
+        type === 'IMAGINATION' ? 320 : 310,
     height: type === 'NODE' ? 90 : 240,
     images: [],
     seeds: [],
-    tier: 10,
+    // Seed Boxes begin compact and grow through 5 → 10 → 20.  The tier is a
+    // presentation capacity, not a second source of truth for the seed list.
+    tier: type === 'SEED_BOX' ? 5 : 10,
     shuffle: Math.random(),
     focal: 50,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
 }
+export function imaginationDimensions(imageCount: number) {
+  if (imageCount <= 1) return { width: 320, height: 240 };
+  if (imageCount <= 4) return { width: 460, height: 320 };
+  return { width: 620, height: 420 };
+}
 export function objectHeight(o: CanvasObject) {
   if (o.type === 'SEED_BOX')
-    return Math.max(o.height, seedLayout(o).height + 115);
+    return Math.max(o.height, seedLayout(o).height + 132);
   if (o.type !== 'NODE') return o.height;
   const goal = o.role === 'GOAL';
   const columns = Math.max(
@@ -71,12 +80,12 @@ export function objectHeight(o: CanvasObject) {
         (goal ? 12 : 8.5),
     ),
   );
-  const lines = o.text
+  const lines = Math.min(3, o.text
     .split('\n')
     .reduce(
       (total, line) => total + Math.max(1, Math.ceil(line.length / columns)),
       0,
-    );
+    ));
   return goal
     ? 77 + lines * 32 + (o.images.length ? 145 : 0)
     : 44 + Math.max(o.images.length ? 48 : 30, lines * 24);
@@ -117,6 +126,7 @@ export function pointerSelectionPlan(
   explicitSelection: boolean,
   objectId: string,
   toggle: boolean,
+  moveBranch = false,
 ): PointerSelectionPlan {
   const clickedSelection = new Set([objectId]);
   if (toggle) {
@@ -145,7 +155,7 @@ export function pointerSelectionPlan(
     clickedSelection,
     visibleSelection: new Set(clickedSelection),
     movementIds:
-      object?.type === 'NODE'
+      moveBranch && object?.type === 'NODE'
         ? reachable(map, objectId)
         : new Set(clickedSelection),
     explicit: false,
@@ -847,20 +857,20 @@ export function addSeed(map: VisionMap, id: string, text: string): VisionMap {
   const o = map.objects.find((o) => o.id === id);
   if (!o || o.type !== 'SEED_BOX') throw new Error('Select a Seed Box.');
   if (!text.trim()) return map;
-  if (o.seeds.length >= 30)
-    throw new Error('Maximum 30 seeds in this Seed Box.');
+  if (o.seeds.length >= 20)
+    throw new Error('Maximum 20 seeds in this Seed Box.');
   const seeds = [
     ...o.seeds,
     { id: uid(), text: text.trim(), visualSeed: Math.random() },
   ];
   const tier = Math.max(
     o.tier,
-    seeds.length > 20 ? 30 : seeds.length > 10 ? 20 : 10,
+    seeds.length > 10 ? 20 : seeds.length > 5 ? 10 : 5,
   );
   return patchObject(map, id, {
     seeds,
     tier,
-    height: Math.max(o.height, 115 + seeds.length * 48),
+    height: Math.max(o.height, 132 + seedLayout({ ...o, seeds }).height),
     shuffle: nextVisualShuffle(o.shuffle),
   });
 }
@@ -880,16 +890,16 @@ export function moveSeed(
     seeds: box.seeds.filter((s) => s.id !== seedId),
   });
   if (target?.type === 'SEED_BOX') {
-    if (target.seeds.length >= 30)
-      throw new Error('Maximum 30 seeds in this Seed Box.');
+    if (target.seeds.length >= 20)
+      throw new Error('Maximum 20 seeds in this Seed Box.');
     const seeds = [...target.seeds, seed];
     next = patchObject(next, target.id, {
       seeds,
       tier: Math.max(
         target.tier,
-        seeds.length > 20 ? 30 : seeds.length > 10 ? 20 : 10,
+        seeds.length > 10 ? 20 : seeds.length > 5 ? 10 : 5,
       ),
-      height: Math.max(target.height, 115 + seeds.length * 48),
+      height: Math.max(target.height, 132 + seedLayout({ ...target, seeds }).height),
     });
     return { map: next, id: target.id };
   }

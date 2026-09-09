@@ -191,13 +191,13 @@ test('seed capacity promotion, transfer, and conversion preserve content', () =>
   let m = setup();
   const box = makeObject('SEED_BOX', { x: 0, y: 0 });
   m.objects.push(box);
-  for (let i = 0; i < 30; i++) m = addSeed(m, box.id, `seed ${i}`);
+  for (let i = 0; i < 20; i++) m = addSeed(m, box.id, `seed ${i}`);
   const b = m.objects.find((o) => o.id === box.id);
-  assert.equal(b.tier, 30);
-  assert.throws(() => addSeed(m, box.id, '31'), /Maximum/);
+  assert.equal(b.tier, 20);
+  assert.throws(() => addSeed(m, box.id, '21'), /Maximum/);
   const r = moveSeed(m, box.id, b.seeds[0].id, { x: 0, y: 300 });
   assert.equal(r.map.objects.find((o) => o.id === r.id).text, 'seed 0');
-  assert.equal(r.map.objects.find((o) => o.id === box.id).seeds.length, 29);
+  assert.equal(r.map.objects.find((o) => o.id === box.id).seeds.length, 19);
 });
 test('type restrictions and reference direction', () => {
   let m = setup();

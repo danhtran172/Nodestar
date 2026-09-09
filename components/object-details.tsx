@@ -109,7 +109,7 @@ export function ObjectDetails(p: Props) {
                 />
               </label>
             )}
-            <div className="size-fields">
+            {o.type !== 'IMAGINATION' && <div className="size-fields">
               <label className="field-label">
                 Width
                 <input
@@ -156,7 +156,7 @@ export function ObjectDetails(p: Props) {
                   />
                 </label>
               )}
-            </div>
+            </div>}
             {o.type === 'SEED_BOX' ? (
               <>
                 <label className="field-label">
@@ -167,7 +167,7 @@ export function ObjectDetails(p: Props) {
                       p.onPatch(o.id, { tier: Number(e.target.value) })
                     }
                   >
-                    {[10, 20, 30].map((tier, i) => (
+                    {[5, 10, 20].map((tier, i) => (
                       <NativeSelectOption
                         key={tier}
                         value={tier}
@@ -179,10 +179,10 @@ export function ObjectDetails(p: Props) {
                   </NativeSelect>
                 </label>
                 <div className="section-line">
-                  <span>Seeds · {o.seeds.length}/30</span>
+                  <span>Loose ideas</span>
                   <button
                     className="text-action"
-                    disabled={o.seeds.length >= 30}
+                    disabled={o.seeds.length >= 20}
                     onClick={() => p.onSeed(o.id)}
                   >
                     <Plus size={16} /> Add seed
@@ -235,6 +235,26 @@ export function ObjectDetails(p: Props) {
               </>
             ) : (
               <>
+                {o.type === 'IMAGINATION' && (
+                  <div className="field-label">
+                    Canvas size
+                    <NativeSelect
+                      value={o.width < 390 ? 'small' : o.width < 560 ? 'medium' : 'large'}
+                      onChange={(e) => {
+                        const size = e.target.value === 'small'
+                          ? { width: 320, height: 240 }
+                          : e.target.value === 'medium'
+                            ? { width: 460, height: 320 }
+                            : { width: 620, height: 420 };
+                        p.onPatch(o.id, size);
+                      }}
+                    >
+                      <NativeSelectOption value="small">Small</NativeSelectOption>
+                      <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                      <NativeSelectOption value="large">Large</NativeSelectOption>
+                    </NativeSelect>
+                  </div>
+                )}
                 <div className="section-line">
                   <span>
                     {o.type === 'IMAGINATION'
