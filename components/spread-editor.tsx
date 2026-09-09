@@ -150,7 +150,7 @@ function applyImageReference(map: VisionMap, request: PendingImageRequest) {
   return patchObject(next, target.id, {
     images,
     ...(target.type === 'IMAGINATION'
-      ? imaginationDimensions(images.length)
+      ? imaginationDimensions(images.length, target.imaginationPreset)
       : {}),
   });
 }

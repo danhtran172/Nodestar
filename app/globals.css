@@ -210,7 +210,8 @@ textarea:focus-visible {
   overflow: hidden;
 }
 .seed_box .object-label,
-.imagination .object-label {
+.imagination .object-label,
+.object-title {
   margin: 0;
   padding: 18px 20px 10px;
 }
@@ -239,9 +240,18 @@ textarea:focus-visible {
 .goal .object-text {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   overflow: hidden;
 }
+.object-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #5c6f88;
+}
+.object-title .object-text { min-width: 0; font-size: 16px; }
+.seed_box .object-title { color: #766341; }
+.imagination .object-title { color: #726b88; }
 .canvas-object.goal {
   background: #edf3ff;
   border-color: #b9c9e9;
@@ -590,14 +600,15 @@ textarea:focus-visible {
   min-width: 0;
 }
 .node-thumbnail {
-  width: 48px;
-  height: 48px;
+  width: 64px;
+  height: 64px;
   object-fit: cover;
   border-radius: 7px;
+  margin: -10px 0 -10px -10px;
 }
 .hero-image {
   height: 150px;
-  margin: -25px -25px 20px;
+  margin: -25px -25px 16px;
   overflow: hidden;
   border-radius: 13px 13px 0 0;
 }
@@ -726,6 +737,10 @@ textarea:focus-visible {
   height: calc(100% - 52px);
   border-radius: 0;
 }
+.imagination .image-grid.count-2.portrait-led { grid-template-columns: 1fr; grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.imagination .image-grid.count-2.landscape-led { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.imagination .image-grid.count-4.portrait-led .image-slot:first-child { grid-row: span 2; }
+.imagination .image-grid.count-4.landscape-led .image-slot:first-child { grid-column: span 2; }
 .imagination .image-empty {
   width: 100%;
   height: calc(100% - 52px);
@@ -870,6 +885,8 @@ textarea:focus-visible {
   font-size: 13px;
 }
 .object-context-menu button:hover { background: #edf3ff; }
+.display-note-toggle { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; }
+.display-note-toggle input { width: 15px; height: 15px; accent-color: var(--blue); }
 .all-maps-dialog { width: min(720px, calc(100vw - 32px)); }
 .all-maps-list { display: grid; gap: 8px; max-height: min(52vh, 480px); overflow: auto; }
 .map-row {

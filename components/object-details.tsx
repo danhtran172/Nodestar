@@ -17,10 +17,6 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet';
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select';
 import { Slider } from '@/components/ui/slider';
 import type { CanvasObject } from '@/lib/graph';
 import type { Asset } from '@/lib/storage';
@@ -109,6 +105,16 @@ export function ObjectDetails(p: Props) {
                 />
               </label>
             )}
+            {o.type === 'NODE' && o.note && (
+              <label className="display-note-toggle">
+                <input
+                  type="checkbox"
+                  checked={!!o.displayNote}
+                  onChange={(e) => p.onPatch(o.id, { displayNote: e.target.checked })}
+                />
+                Display note on canvas
+              </label>
+            )}
             {o.type !== 'IMAGINATION' && <div className="size-fields">
               <label className="field-label">
                 Width
@@ -159,25 +165,6 @@ export function ObjectDetails(p: Props) {
             </div>}
             {o.type === 'SEED_BOX' ? (
               <>
-                <label className="field-label">
-                  Box size
-                  <NativeSelect
-                    value={o.tier}
-                    onChange={(e) =>
-                      p.onPatch(o.id, { tier: Number(e.target.value) })
-                    }
-                  >
-                    {[5, 10, 20].map((tier, i) => (
-                      <NativeSelectOption
-                        key={tier}
-                        value={tier}
-                        disabled={o.seeds.length > tier}
-                      >
-                        {['Small', 'Medium', 'Large'][i]} · up to {tier} seeds
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </label>
                 <div className="section-line">
                   <span>Loose ideas</span>
                   <button
@@ -238,21 +225,19 @@ export function ObjectDetails(p: Props) {
                 {o.type === 'IMAGINATION' && (
                   <div className="field-label">
                     Canvas size
-                    <NativeSelect
-                      value={o.width < 390 ? 'small' : o.width < 560 ? 'medium' : 'large'}
+                    <select
+                      value={o.imaginationPreset || (o.width < 390 ? 'small' : o.width < 560 ? 'medium' : 'large')}
                       onChange={(e) => {
-                        const size = e.target.value === 'small'
-                          ? { width: 320, height: 240 }
-                          : e.target.value === 'medium'
-                            ? { width: 460, height: 320 }
-                            : { width: 620, height: 420 };
-                        p.onPatch(o.id, size);
+                        const preset = e.target.value as 'small' | 'medium' | 'large';
+                        const scale = o.images.length <= 1 ? 1 : o.images.length === 2 ? 1.2 : o.images.length === 3 ? 1.35 : o.images.length === 4 ? 1.5 : o.images.length === 5 ? 1.62 : 1.75;
+                        const base = preset === 'small' ? { width: 320, height: 240 } : preset === 'medium' ? { width: 440, height: 300 } : { width: 580, height: 380 };
+                        p.onPatch(o.id, { imaginationPreset: preset, width: Math.round(base.width * scale), height: Math.round(base.height * scale) });
                       }}
                     >
-                      <NativeSelectOption value="small">Small</NativeSelectOption>
-                      <NativeSelectOption value="medium">Medium</NativeSelectOption>
-                      <NativeSelectOption value="large">Large</NativeSelectOption>
-                    </NativeSelect>
+                      <option value="small">Small</option>
+                      <option value="medium">Medium</option>
+                      <option value="large">Large</option>
+                    </select>
                   </div>
                 )}
                 <div className="section-line">

@@ -184,6 +184,7 @@ const Card = memo(function Card({
   recordObjectRender();
   const images = o.images.map((id) => assets[id]);
   const layout = useMemo(() => seedLayout(o), [o]);
+  const imageShape = images.filter((image) => image && image.height > image.width * 1.15).length > images.length / 2 ? 'portrait-led' : 'landscape-led';
   return (
     <>
       {o.role === 'GOAL' && o.type === 'NODE' && images.length > 0 && (
@@ -201,17 +202,7 @@ const Card = memo(function Card({
           <Target size={15} /> GOAL
         </div>
       )}
-      {o.type === 'SEED_BOX' && (
-        <div className="object-label">
-          <Sprout size={17} /> Seed Box
-        </div>
-      )}
-      {o.type === 'IMAGINATION' && (
-        <div className="object-label">
-          <ImageIcon size={17} /> Imagination
-        </div>
-      )}
-      <div className="node-content">
+      {o.type === 'NODE' ? <div className="node-content">
         {o.type === 'NODE' &&
           o.role === 'NORMAL' &&
           images.length > 0 &&
@@ -229,8 +220,13 @@ const Card = memo(function Card({
         ) : (
           <div className="object-text">{o.text || 'New idea'}</div>
         )}
-      </div>
-      {o.type === 'NODE' && o.note && (
+      </div> : (
+        <div className="object-title">
+          {o.type === 'SEED_BOX' ? <Sprout size={17} /> : <ImageIcon size={17} />}
+          {editing ? <InlineText key={o.id} object={o} save={onText} draft={onDraft} /> : <div className="object-text">{o.text || (o.type === 'SEED_BOX' ? 'Loose ideas' : 'Imagination')}</div>}
+        </div>
+      )}
+      {o.type === 'NODE' && o.note && o.displayNote && (
         <div className="object-note">{o.note}</div>
       )}
       {o.type === 'SEED_BOX' && (
@@ -294,7 +290,7 @@ const Card = memo(function Card({
       {o.type === 'IMAGINATION' &&
         (images.length ? (
           <div
-            className={`image-grid count-${Math.min(images.length, 6)}`}
+            className={`image-grid count-${Math.min(images.length, 6)} ${imageShape}`}
             onDoubleClick={() => onOpen(o.id)}
           >
             {images.slice(0, 6).map((a, i) => (

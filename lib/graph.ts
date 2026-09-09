@@ -1,4 +1,5 @@
 export type Kind = 'NODE' | 'SEED_BOX' | 'IMAGINATION';
+export type ImaginationPreset = 'small' | 'medium' | 'large';
 export type RelationType = 'PATH' | 'RELATED' | 'REFERENCE';
 export type Seed = { id: string; text: string; visualSeed: number };
 export type CanvasObject = {
@@ -16,6 +17,8 @@ export type CanvasObject = {
   tier: number;
   shuffle: number;
   focal: number;
+  displayNote?: boolean;
+  imaginationPreset?: ImaginationPreset;
   attachment?: string;
   createdAt: number;
   updatedAt: number;
@@ -48,9 +51,7 @@ export function makeObject(
     text,
     note: '',
     ...p,
-    width:
-      type === 'NODE' ? (role === 'GOAL' ? 280 : 210) :
-        type === 'IMAGINATION' ? 320 : 310,
+    width: type === 'NODE' ? (role === 'GOAL' ? 280 : 210) : type === 'IMAGINATION' ? 320 : 310,
     height: type === 'NODE' ? 90 : 240,
     images: [],
     seeds: [],
@@ -59,14 +60,28 @@ export function makeObject(
     tier: type === 'SEED_BOX' ? 5 : 10,
     shuffle: Math.random(),
     focal: 50,
+    imaginationPreset: type === 'IMAGINATION' ? 'small' : undefined,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
 }
-export function imaginationDimensions(imageCount: number) {
-  if (imageCount <= 1) return { width: 320, height: 240 };
-  if (imageCount <= 4) return { width: 460, height: 320 };
-  return { width: 620, height: 420 };
+export function imaginationDimensions(
+  imageCount: number,
+  preset: ImaginationPreset = 'small',
+) {
+  const base = preset === 'small'
+    ? { width: 320, height: 240 }
+    : preset === 'medium'
+      ? { width: 440, height: 300 }
+      : { width: 580, height: 380 };
+  const scale = imageCount <= 1 ? 1 : imageCount === 2 ? 1.2 : imageCount === 3 ? 1.35 : imageCount === 4 ? 1.5 : imageCount === 5 ? 1.62 : 1.75;
+  return {
+    width: Math.round(base.width * scale),
+    height: Math.round(base.height * scale),
+  };
+}
+export function seedCapacity(seedCount: number) {
+  return seedCount > 10 ? 20 : seedCount > 5 ? 10 : 5;
 }
 export function objectHeight(o: CanvasObject) {
   if (o.type === 'SEED_BOX')
@@ -80,7 +95,7 @@ export function objectHeight(o: CanvasObject) {
         (goal ? 12 : 8.5),
     ),
   );
-  const lines = Math.min(3, o.text
+  const lines = Math.min(2, o.text
     .split('\n')
     .reduce(
       (total, line) => total + Math.max(1, Math.ceil(line.length / columns)),
@@ -863,10 +878,7 @@ export function addSeed(map: VisionMap, id: string, text: string): VisionMap {
     ...o.seeds,
     { id: uid(), text: text.trim(), visualSeed: Math.random() },
   ];
-  const tier = Math.max(
-    o.tier,
-    seeds.length > 10 ? 20 : seeds.length > 5 ? 10 : 5,
-  );
+  const tier = seedCapacity(seeds.length);
   return patchObject(map, id, {
     seeds,
     tier,
@@ -895,10 +907,7 @@ export function moveSeed(
     const seeds = [...target.seeds, seed];
     next = patchObject(next, target.id, {
       seeds,
-      tier: Math.max(
-        target.tier,
-        seeds.length > 10 ? 20 : seeds.length > 5 ? 10 : 5,
-      ),
+      tier: seedCapacity(seeds.length),
       height: Math.max(target.height, 132 + seedLayout({ ...target, seeds }).height),
     });
     return { map: next, id: target.id };
@@ -982,7 +991,7 @@ export function validateMap(input: unknown): VisionMap {
       (o.type !== 'NODE' && o.role !== 'NORMAL')
     )
       throw new Error('This map violates object content rules.');
-    if (![10, 20, 30].includes(o.tier) || o.seeds.length > o.tier)
+    if (![5, 10, 20, 30].includes(o.tier) || o.seeds.length > 20)
       throw new Error('This Seed Box has an invalid capacity.');
     for (const seed of o.seeds) {
       if (
