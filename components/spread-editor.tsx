@@ -154,9 +154,33 @@ function applyImageReference(map: VisionMap, request: PendingImageRequest) {
       : {}),
   });
 }
+function MapPreview({ map }: { map: VisionMap }) {
+  if (!map.objects.length) return <div className="map-preview empty">Empty canvas</div>;
+  const left = Math.min(...map.objects.map((object) => object.x));
+  const top = Math.min(...map.objects.map((object) => object.y));
+  const right = Math.max(...map.objects.map((object) => object.x + object.width));
+  const bottom = Math.max(...map.objects.map((object) => object.y + objectHeight(object)));
+  const scale = Math.min(112 / Math.max(1, right - left), 62 / Math.max(1, bottom - top));
+  return (
+    <div className="map-preview" aria-label={`Preview of ${map.title}`}>
+      {map.objects.map((object) => (
+        <i
+          key={object.id}
+          className={`${object.type.toLowerCase()} ${object.role.toLowerCase()}`}
+          style={{
+            left: 6 + (object.x - left) * scale,
+            top: 6 + (object.y - top) * scale,
+            width: Math.max(7, object.width * scale),
+            height: Math.max(6, objectHeight(object) * scale),
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 export default function SpreadEditor() {
   const ws = useWorkspace(),
-    { map, commit, undo, redo, assets, setAssets } = ws;
+    { map, commit, undo, redo, assets, setAssets, saveViewport } = ws;
   const [selected, setSelected] = useState(new Set<string>()),
     [explicit, setExplicit] = useState(false),
     [edge, setEdge] = useState(''),
@@ -192,7 +216,8 @@ export default function SpreadEditor() {
     importInput = useRef<HTMLInputElement>(null),
     imageTarget = useRef<{ id?: string; replace?: string }>({}),
     clipboard = useRef<VisionMap | null>(null),
-    didFit = useRef(false);
+    didFit = useRef(false),
+    openedMap = useRef('');
   const obj = map?.objects.find((o) => selected.has(o.id)),
     one = selected.size === 1 ? obj : undefined;
   const edgeObject = map?.relationships.find((e) => e.id === edge);
@@ -261,36 +286,24 @@ export default function SpreadEditor() {
     });
   }, []);
   useEffect(() => {
-    if (map && !didFit.current) {
-      didFit.current = true;
-      try {
-        const raw = localStorage.getItem('spread-viewport');
-        if (raw) {
-          const v = JSON.parse(raw);
-          if (
-            Number.isFinite(v.x) &&
-            Number.isFinite(v.y) &&
-            v.zoom >= 0.18 &&
-            v.zoom <= 2.5
-          ) {
-            setViewport(v);
-            return;
-          }
-        }
-      } catch {}
-      fit(map.objects);
+    if (!map || openedMap.current === ws.activeMapId) return;
+    openedMap.current = ws.activeMapId;
+    didFit.current = true;
+    const saved = ws.maps.find((entry) => entry.id === ws.activeMapId)?.viewport;
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) && saved.zoom >= 0.18 && saved.zoom <= 2.5) {
+      setViewport(saved);
+      return;
     }
-  }, [map, fit]);
+    fit(map.objects);
+  }, [map, fit, ws.activeMapId, ws.maps]);
   useEffect(() => {
     if (didFit.current) {
       const t = setTimeout(() => {
-        try {
-          localStorage.setItem('spread-viewport', JSON.stringify(viewport));
-        } catch {}
+        saveViewport(viewport);
       }, 200);
       return () => clearTimeout(t);
     }
-  }, [viewport]);
+  }, [viewport, saveViewport]);
   useEffect(() => {
     try {
       const stored = localStorage.getItem('spread-canvas-theme');
@@ -1294,8 +1307,9 @@ export default function SpreadEditor() {
                       setAllMaps(false);
                     }}
                   >
+                    <MapPreview map={entry.map} />
                     <strong>{entry.title}</strong>
-                    <small>{entry.map.objects.length} objects · {entry.archived ? 'Archived' : entry.id === ws.activeMapId ? 'Open now' : 'Open map'}</small>
+                    <small>{entry.map.objects.length} objects · {entry.archived ? 'Archived' : entry.id === ws.activeMapId ? 'Open now' : `Edited ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(entry.updatedAt)}`}</small>
                   </button>
                   <input
                     aria-label={`Rename ${entry.title}`}

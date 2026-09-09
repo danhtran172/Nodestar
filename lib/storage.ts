@@ -7,6 +7,7 @@ export type MapEntry = {
   updatedAt: number;
   archived: boolean;
   map: VisionMap;
+  viewport?: { x: number; y: number; zoom: number };
 };
 export type MapCatalog = {
   version: 1;

@@ -317,6 +317,20 @@ export function useWorkspace() {
     void saveMapCatalog(catalog);
     if (nextActive !== currentCatalog.activeId) selectMap(nextActive);
   }, [publishCatalog, selectMap]);
+  const saveViewport = useCallback((viewport: { x: number; y: number; zoom: number }) => {
+    const currentCatalog = catalogRef.current;
+    if (!currentCatalog) return;
+    const active = currentCatalog.activeId;
+    const catalog = publishCatalog({
+      ...currentCatalog,
+      entries: currentCatalog.entries.map((entry) =>
+        entry.id === active ? { ...entry, viewport } : entry,
+      ),
+    });
+    writeQueue.current = writeQueue.current
+      .catch(() => {})
+      .then(() => saveMapCatalog(catalog));
+  }, [publishCatalog]);
   return {
     map,
     current,
@@ -341,5 +355,6 @@ export function useWorkspace() {
     renameMap,
     archiveMap,
     deleteMap,
+    saveViewport,
   };
 }
