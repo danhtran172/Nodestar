@@ -360,6 +360,8 @@ const Card = memo(function Card({
   previous.object.height === next.object.height &&
   previous.object.focal === next.object.focal &&
   previous.object.note === next.object.note &&
+  previous.object.displayNote === next.object.displayNote &&
+  previous.object.imaginationPreset === next.object.imaginationPreset &&
   previous.object.shuffle === next.object.shuffle &&
   previous.object.tier === next.object.tier &&
   previous.object.images.length === next.object.images.length &&
