@@ -30,12 +30,15 @@ async function seed(page: Page, count: number) {
   await page.goto('/');
   await page.evaluate(async ({ map, assets }) => {
     localStorage.clear();
+    // These specs cover free canvas placement; graph mode is exercised by
+    // graph-layout.spec.ts.
+    localStorage.setItem('nodestar-layout-mode', 'canvas');
     localStorage.setItem(
-      'spread-recovery-v1',
+      'nodestar-recovery-v1',
       JSON.stringify({ schemaVersion: 1, revision: 1, savedAt: 1, map }),
     );
     await new Promise<void>((resolve, reject) => {
-      const open = indexedDB.open('spread-workspace', 1);
+      const open = indexedDB.open('nodestar-workspace', 1);
       open.onerror = () => reject(open.error);
       open.onsuccess = () => {
         const transaction = open.result.transaction(['maps', 'assets'], 'readwrite');
@@ -66,7 +69,7 @@ async function measure(
 ): Promise<InteractionResult> {
   const before = await performanceMetrics(session);
   await page.evaluate(() => {
-    window.__spreadPerformanceProbe = { objectRenders: 0, edgeRenders: 0, commits: [] };
+    window.__nodestarPerformanceProbe = { objectRenders: 0, edgeRenders: 0, commits: [] };
     const frames: number[] = [];
     const longTasks: number[] = [];
     let previous = performance.now();
@@ -85,15 +88,15 @@ async function measure(
     window.setTimeout(() => {
       active = false;
       observer.disconnect();
-      window.__spreadPerfInteraction = { frames, longTasks };
+      window.__nodestarPerfInteraction = { frames, longTasks };
     }, 900);
   });
   await action();
   await page.waitForTimeout(950);
   const after = await performanceMetrics(session);
   return page.evaluate(() => {
-    const probe = window.__spreadPerformanceProbe!;
-    const interaction = window.__spreadPerfInteraction as { frames: number[]; longTasks: number[] };
+    const probe = window.__nodestarPerformanceProbe!;
+    const interaction = window.__nodestarPerfInteraction as { frames: number[]; longTasks: number[] };
     return {
       frames: interaction.frames.slice(2),
       longTasks: interaction.longTasks,
@@ -112,7 +115,7 @@ async function measure(
 
 declare global {
   interface Window {
-    __spreadPerfInteraction?: unknown;
+    __nodestarPerfInteraction?: unknown;
   }
 }
 

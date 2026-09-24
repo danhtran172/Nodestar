@@ -175,3 +175,57 @@ test('predictive output is deterministic and preserves unrelated identity', () =
     map.objects.find(({ id }) => id === 'distant'),
   );
 });
+
+test('a drag in flight tracks the pointer literally and reports the overlap', () => {
+  const map = baseMap();
+  const input = {
+    baseMap: map,
+    movingIds: new Set(['root', 'child', 'shared', 'goal']),
+    dragDelta: { x: 0, y: 360 },
+    draggedRootId: 'root',
+    explicitSelection: false,
+  };
+  const flight = predictiveLayout({ ...input, settle: false });
+  assert.equal(flight.valid, true);
+  assert.deepEqual(position(flight.previewMap, 'root'), { x: 0, y: 360 });
+  assert.deepEqual(position(flight.previewMap, 'child'), { x: 340, y: 360 });
+  assert.equal(flight.overlappingIds.has('root'), true);
+  assert.equal(flight.overlappingIds.has('goal'), false);
+  const settled = predictiveLayout(input);
+  assert.equal(settled.overlappingIds.size, 0);
+  assert.notDeepEqual(position(settled.previewMap, 'root'), { x: 0, y: 360 });
+});
+
+test('an unsettled drag over free space reports no overlap', () => {
+  const map = baseMap();
+  const result = predictiveLayout({
+    baseMap: map,
+    movingIds: new Set(['root', 'child', 'shared', 'goal']),
+    dragDelta: { x: 0, y: -400 },
+    draggedRootId: 'root',
+    explicitSelection: false,
+    settle: false,
+  });
+  assert.equal(result.overlappingIds.size, 0);
+  assert.deepEqual(position(result.previewMap, 'root'), { x: 0, y: -400 });
+});
+
+test('an unsettled re-parent still applies the attachment change', () => {
+  const map = baseMap();
+  const result = predictiveLayout({
+    baseMap: map,
+    movingIds: new Set(['root', 'child', 'shared', 'goal']),
+    dragDelta: { x: 0, y: 300 },
+    draggedRootId: 'root',
+    optionalTargetId: 'target',
+    explicitSelection: false,
+    settle: false,
+  });
+  assert.equal(result.valid, true);
+  assert.equal(
+    result.previewMap.relationships.some(({ id }) => id === 'old-root'),
+    false,
+  );
+  assert.deepEqual(position(result.previewMap, 'root'), { x: 0, y: 300 });
+  assert.equal(result.overlappingIds.has('root'), true);
+});

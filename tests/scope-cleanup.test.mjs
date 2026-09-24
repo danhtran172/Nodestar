@@ -4,7 +4,7 @@ import test from 'node:test';
 
 test('V1 source and README contain no WebMCP registration path', async () => {
   const [editor, readme] = await Promise.all([
-    readFile(new URL('../components/spread-editor.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/nodestar-editor.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../README.md', import.meta.url), 'utf8'),
   ]);
   for (const forbidden of [

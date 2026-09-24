@@ -1,4 +1,4 @@
-# SPREAD
+# NODESTAR
 
 ## Product & Interaction Specification V1.0
 
@@ -12,20 +12,20 @@
 
 # 1. PRODUCT VISION
 
-## 1.1 Spread là gì?
+## 1.1 Nodestar là gì?
 
-Spread là một ứng dụng visual planning dành cho cá nhân, kết hợp tư duy của:
+Nodestar là một ứng dụng visual planning dành cho cá nhân, kết hợp tư duy của:
 
 * mind map;
 * vision map;
 * moodboard;
 * spatial planning.
 
-Spread giúp người dùng:
+Nodestar giúp người dùng:
 
 > nhìn thấy những điều họ muốn hướng tới, các khía cạnh tạo nên chúng và những con đường có thể dẫn đến nhiều đích khác nhau.
 
-Spread không phải:
+Nodestar không phải:
 
 * task manager;
 * project management;
@@ -34,7 +34,7 @@ Spread không phải:
 * note-taking database;
 * diagramming tool.
 
-Spread tập trung vào:
+Nodestar tập trung vào:
 
 > **Design and follow interconnected paths toward what you want.**
 
@@ -42,7 +42,7 @@ Spread tập trung vào:
 
 # 2. PRODUCT PHILOSOPHY
 
-Spread phải tạo được cảm giác:
+Nodestar phải tạo được cảm giác:
 
 > “Wow, app này quá tinh tế.”
 
@@ -108,7 +108,7 @@ Graph readability là ưu tiên UI cao nhất.
 
 Một graph có data phức tạp vẫn phải có visualization đơn giản.
 
-Spread phải ưu tiên:
+Nodestar phải ưu tiên:
 
 * spacing;
 * alignment;
@@ -129,7 +129,7 @@ User quyết định:
 * direction;
 * vị trí/nhánh muốn đặt.
 
-Spread xử lý:
+Nodestar xử lý:
 
 * pixel positioning;
 * spacing;
@@ -140,13 +140,13 @@ Spread xử lý:
 
 Nguyên tắc:
 
-> User decides intention. Spread handles arrangement.
+> User decides intention. Nodestar handles arrangement.
 
 ---
 
 # 4. CORE PLANNING MODEL
 
-Spread hỗ trợ đồng thời:
+Nodestar hỗ trợ đồng thời:
 
 ## 4.1 Goal-first
 
@@ -184,7 +184,7 @@ Sau đó dần phát hiện:
 
 ## 4.3 Graph model
 
-Spread không sử dụng strict tree.
+Nodestar không sử dụng strict tree.
 
 Một Node có thể:
 
@@ -241,11 +241,127 @@ Spatial:
             outward →
 ```
 
-Semantic:
+Semantic: hướng mũi tên của PATH mới do tùy chọn **New arrows** của map quyết định (công tắc hai nút trên thanh công cụ dưới canvas, cạnh Graph/Canvas):
 
 ```text
-Contributor → ◎ Goal
+Away from goal (mặc định):  ◎ Goal → Contributor
+Toward goal:               Contributor → ◎ Goal
 ```
+
+Đổi tùy chọn chỉ áp dụng cho các PATH tạo **sau đó** (nút `+`, kéo node vào node khác, biến seed thành node, nối lại khi xóa node). PATH đã có giữ nguyên hướng và vẫn Reverse được từng cái. Kết nối kéo tay (Connect, nút connect giữa node) giữ đúng chiều người vẽ.
+
+---
+
+## 5.3 Layout mode
+
+Canvas có hai chế độ bố cục. Phím **G** đổi chế độ, **Shift + G** sắp xếp lại ngay.
+Lựa chọn được nhớ trên thiết bị.
+
+### Graph mode (mặc định)
+
+Graph tự sắp — **auto sort** — sau mỗi thay đổi:
+
+* Node cùng cấp nằm chung một cột, bên trái hoặc bên phải Central Node.
+* Khoảng cách ngang giữa hai cột liền nhau luôn bằng nhau.
+* Node có con được nới rộng khoảng cách dọc với các node kề bên, để nhánh toả ra đọc được.
+* Node cha luôn nằm giữa khối con của nó.
+* Central Node giữ nguyên vị trí, nên việc sắp xếp không kéo cả bản đồ ra khỏi tầm nhìn.
+* Nhánh giữ nguyên phía trái/phải mà nó đang ở; hai hay ba nhánh có thể cùng nằm một bên. Chỉ khi một bên nhiều hơn bên kia quá 3 nhánh thì nhánh mới nhất của bên nặng mới được chuyển sang bên nhẹ (ví dụ trái 1, phải 5 → trái 2, phải 4).
+* Object không nối với Central Node được xếp thành khối riêng bên dưới.
+
+Người dùng vẫn kéo thả được, nhưng theo khung cố định:
+
+* Trong lúc kéo, **predicted position** hiện ra: một khối xám đúng kích thước thẻ,
+  ở ô nó sẽ rơi vào, kèm đường nối xám vẽ tới đó. Đường nối thật đang chạy theo
+  con trỏ được làm mờ, nên không vẽ trùng hai lần.
+* Thả lại đúng ô cũ không tính là thay đổi, nên không tạo bước undo.
+
+### Drop rules
+
+Vị trí con trỏ quyết định ý nghĩa của cú thả:
+
+| Thả ở đâu | Kết quả | Báo hiệu |
+| --- | --- | --- |
+| **Trên thân một thẻ** | Node trở thành **con** của thẻ đó, lùi ra một cột | Thẻ đích sáng viền |
+| **Dải ngay trên / dưới một thẻ** | Node thành **cùng cấp** với thẻ đó, chèn vào đúng chỗ | Thanh chèn màu xanh |
+| **Khoảng trống** | Giữ nguyên cha, chỉ sắp lại | Chỉ có khối xám |
+
+* Quan hệ đang xếp hạng node bị gỡ khi đổi cha, nếu không cha cũ vẫn tới được nó trước
+  và cấp sẽ không thực sự thay đổi.
+* Không thể thả một node vào chính nhánh của nó — những thẻ đó không nhận drop.
+* Node gốc của một component không có cấp để làm anh em, nên dải trên/dưới nó không nhận.
+
+### Canvas mode
+
+Giữ nguyên hành vi cũ: đặt thẻ tự do đến từng pixel, không sắp lại.
+Quay về graph mode sẽ sắp lại toàn bộ — và undo được.
+
+---
+
+## 5.4 Chọn và đổi loại object
+
+* **Chuột phải vào `+`** của một node → chọn loại object sẽ tạo: Node, Goal, Seed Box,
+  Imagination. Bấm trái như cũ vẫn tạo Node.
+* **Chuột phải vào một object** → ngoài Edit title / Details / Connect còn có mục
+  **Change kind**. Loại đang là được đánh dấu và không bấm được.
+
+Đổi loại không bao giờ để lại một bản đồ không mở được:
+
+* Nội dung loại mới không chứa được sẽ bị bỏ — Seed Box không giữ ảnh, Node giữ tối đa
+  một ảnh, chỉ Seed Box có seed. Undo trả lại toàn bộ.
+* Mọi quan hệ của nó được định lại loại theo cặp mới: PATH giữa hai Node, REFERENCE
+  giữa Imagination và Node, RELATED cho phần còn lại. Cặp nào không diễn đạt được thì
+  quan hệ đó bị bỏ.
+* `attachment` của mọi object được trỏ lại đúng một PATH thực sự kết thúc ở nó.
+
+---
+
+## 5.5 Graph object
+
+Một **Graph object** đại diện cho một Vision Map khác ngay trong bản đồ này.
+
+* Nó **chỉ hiện Central Goal** của map đó, đọc trực tiếp từ catalog. Đổi tên goal
+  bên kia thì thẻ bên này đổi theo; không sửa được nhãn tại chỗ.
+* **Bấm vào nó** → hỏi có chuyển sang graph đó không. Bản đồ hiện tại ở nguyên, quay
+  về qua All Maps.
+* Về cấu trúc nó là một node: đứng trên PATH, nhận nhánh con, xếp cột như mọi node
+  khác trong graph mode.
+
+Tạo nó có hai đường, cả hai đều mở cùng một hộp chọn:
+
+| Chọn | Kết quả |
+| --- | --- |
+| **Một graph đã có** | Thẻ trỏ tới map đó; danh sách hiện Central Goal kèm tên map |
+| **Tạo mới** | Hệ thống tạo luôn một map mới chỉ gồm Central Goal mang tên vừa nhập |
+
+Map mới được thêm vào workspace mà **không** rời bản đồ đang mở.
+
+Map tạo từ menu (New map) bắt đầu với tên tạm "Untitled vision". Lần đầu Central Goal (node đầu tiên đặt lên map) được đặt tên, map lấy luôn tên đó. Nếu user đã tự đổi tên map trước, hoặc tên đã được lấy một lần, tên map giữ nguyên khi Central Goal đổi tên sau này.
+
+Ràng buộc dữ liệu: `mapRef` chỉ tồn tại trên Graph object và luôn phải có — một Graph
+object không liên kết thì không đại diện cho gì, nên `validateMap` từ chối. Đổi sang
+loại khác sẽ bỏ liên kết; map được trỏ tới không bị ảnh hưởng.
+
+---
+
+## 5.6 Thu gọn nhánh
+
+Mỗi thẻ có node con mang một **nút thu gọn** đặt ngay đầu các path rời khỏi nó —
+trên cạnh hướng ra ngoài, cùng phía nhánh toả ra.
+
+* **Một lần bấm ẩn toàn bộ nhánh**, sâu bao nhiêu cũng ẩn hết, kể cả Seed Box và
+  Imagination treo trong đó. Thẻ vừa bấm thì ở lại.
+* Khi mở, nút là icon gấp vào. Khi đã thu, nó thành **số đếm** những gì đang giữ —
+  vừa là trạng thái, vừa là lý do để bấm lại. Không dùng dấu trừ.
+* Node gốc của một component không có nút này: thu gọn nó sẽ chỉ còn lại một thẻ.
+
+Nhánh đã thu không chiếm chỗ: graph mode sắp lại phần còn thấy cho sát vào nhau.
+Các thẻ bị ẩn giữ nguyên toạ độ, mở ra là về đúng hạng cũ.
+
+Những gì đang ẩn thì không tương tác được: không nhận drop, không ở trong vùng fit,
+không đếm vào số object dưới chân canvas (chỗ đó báo riêng bao nhiêu thẻ đang thu),
+và thẻ đang chọn mà bị ẩn thì bỏ chọn luôn. Riêng **Search vẫn tìm ra** và tự mở
+đường tới nó.
 
 ---
 
@@ -474,10 +590,13 @@ Default:
 
 **cover crop**
 
-User có thể:
+User có thể (trong Detail, với mọi ảnh của Node và Imagination):
 
-* reposition;
-* adjust focal area.
+* kéo ảnh trong khung để di chuyển vị trí;
+* cuộn chuột trên khung để phóng to hoặc thu nhỏ quanh con trỏ (0.25x đến 5x; dưới 1x ảnh nằm gọn trong khung và kéo được tới mép khung);
+* reset về cover mặc định.
+
+Crop lưu theo từng ảnh (`crops[assetId] = {x, y, scale}`); ảnh của Node còn giữ `focal`/`focalX` đồng bộ để tương thích bản đồ cũ.
 
 Không expose các option:
 
@@ -565,7 +684,7 @@ Resize tự do hơn.
 
 # 13. RELATIONSHIP MODEL
 
-Spread V1 có đúng 3 relationship types.
+Nodestar V1 có đúng 3 relationship types.
 
 ```text
 PATH
@@ -771,6 +890,25 @@ REFERENCE là special case của Imagination.
 
 Đây là primary graph interaction.
 
+## 19.0 Node handles
+
+Mỗi Node/Goal có hai nút:
+
+| Nút | Vị trí | Việc làm |
+| --- | --- | --- |
+| Xanh lá `+` | ngay ngoài cạnh phải | thêm node tiếp theo (chuột phải để chọn loại) |
+| Xanh dương (biểu tượng connect) | giữa node | kéo ra để tạo path tới node khác |
+
+Hiển thị:
+
+* nút `+`: ẩn khi không hover/chọn node; mờ khi hover hoặc đang chọn node; rõ khi con trỏ lại gần;
+* nút connect: ẩn khi con trỏ ở xa tâm node; mờ khi con trỏ đủ gần tâm (chữ của node cũng mờ đi để nút nổi lên); rõ khi con trỏ nằm đúng trên nút;
+* thiết bị không có hover (cảm ứng, bút): node đang chọn hiện nút connect ở dạng mờ để chạm được.
+
+Khi kéo từ nút connect, dây path xem trước bắt đầu từ tâm nút (tâm node) và hướng về phía con trỏ.
+
+Nút giữa chỉ vẽ path khi **kéo** quá vài pixel. Bấm rồi thả tại chỗ vẫn là bấm vào node (chọn node, mở Graph object), nhấp đúp vẫn sửa chữ, chuột phải vẫn mở menu của node. Muốn di chuyển node thì kéo từ phần còn lại của thẻ.
+
 ## 19.1 Normal Node
 
 Hover/select Node:
@@ -793,10 +931,11 @@ Behavior:
 4. select New Node;
 5. activate inline text editing.
 
-Default direction:
+Default direction theo tùy chọn **New arrows** của map:
 
 ```text
-Current → New
+Away from goal (mặc định):  Current → New
+Toward goal:               New → Current
 ```
 
 PATH có thể Reverse sau.
@@ -805,17 +944,14 @@ PATH có thể Reverse sau.
 
 ## 19.2 Goal
 
-Goal `+` có semantic khác vì user đã explicit mark Goal.
-
-Click `+`:
+Goal `+` dùng cùng quy tắc với Node: hướng mũi tên theo tùy chọn **New arrows** của map.
 
 ```text
-New Contributor → ◎ Goal
+Away from goal (mặc định):  ◎ Goal → New Contributor
+Toward goal:               New Contributor → ◎ Goal
 ```
 
 Spatially New Contributor vẫn được đặt outward.
-
-Semantic arrow hướng vào Goal.
 
 ---
 
@@ -921,7 +1057,7 @@ Undo available.
 
 # 24. AUTO-ARRANGE PRINCIPLE
 
-Spread sử dụng:
+Nodestar sử dụng:
 
 > **Predictive branch-level auto-arrange.**
 
@@ -943,7 +1079,7 @@ Old position có thể giữ placeholder nhẹ.
 
 ## 25.2 Predictive Preview
 
-Spread detect candidate semantic slot.
+Nodestar detect candidate semantic slot.
 
 Hiển thị:
 
@@ -1075,7 +1211,7 @@ A ─┐
 X ─┘
 ```
 
-Spread giữ một internal concept:
+Nodestar giữ một internal concept:
 
 **layout attachment**
 
@@ -1094,7 +1230,7 @@ Auto-arrange sử dụng:
 
 > **branch-level reflow.**
 
-Spread được phép:
+Nodestar được phép:
 
 * shift Nodes trong branch liên quan;
 * tạo spacing;
@@ -1288,7 +1424,7 @@ Delete action disabled.
 
 Reason:
 
-Spread không thể xác định reconnect intent an toàn.
+Nodestar không thể xác định reconnect intent an toàn.
 
 ---
 
@@ -1867,7 +2003,7 @@ Không auto-enter Focus.
 
 # 68. SEMANTIC ZOOM
 
-Spread không auto-collapse branch.
+Nodestar không auto-collapse branch.
 
 Mọi Node vẫn tồn tại spatially.
 
@@ -1944,7 +2080,7 @@ Exact shortcut mapping có thể điều chỉnh trong UX implementation.
 
 # 71. UI ARCHITECTURE
 
-Spread sử dụng 3 tầng interaction.
+Nodestar sử dụng 3 tầng interaction.
 
 ---
 
@@ -2808,7 +2944,7 @@ Create Imagination
 ↓
 paste/drop images
 ↓
-Spread auto-layouts images
+Nodestar auto-layouts images
 ↓
 reorder / resize
 ↓
@@ -2828,7 +2964,7 @@ all downstream PATH follows
 ↓
 hover candidate branch slot
 ↓
-Spread previews final graph
+Nodestar previews final graph
 ↓
 branch-level reflow preview
 ↓
@@ -2900,19 +3036,19 @@ Mỗi feature mới phải trả lời:
 
 Nếu không:
 
-→ không mặc định đưa vào Spread.
+→ không mặc định đưa vào Nodestar.
 
 ---
 
 # 113. FEATURE COMPLETENESS PRINCIPLE
 
-Spread không cố:
+Nodestar không cố:
 
 > có tất cả feature mà competitor có.
 
-Spread cố:
+Nodestar cố:
 
-> có đầy đủ những capability cần thiết cho core job của Spread.
+> có đầy đủ những capability cần thiết cho core job của Nodestar.
 
 Do đó:
 
@@ -2922,7 +3058,7 @@ Do đó:
 
 # 114. FINAL PRODUCT MODEL
 
-Spread có bốn object semantic chính:
+Nodestar có bốn object semantic chính:
 
 ```text
 NODE
@@ -2953,7 +3089,7 @@ Imagination visually references a Node/Goal.
 
 ---
 
-# 115. CORE SPREAD EXPERIENCE
+# 115. CORE NODESTAR EXPERIENCE
 
 Trải nghiệm lý tưởng:
 
@@ -2977,11 +3113,11 @@ Focus when complexity grows
 Always understand where things lead
 ```
 
-Spread không bắt user phải hoàn thiện cấu trúc ngay.
+Nodestar không bắt user phải hoàn thiện cấu trúc ngay.
 
 Nhưng khi structure xuất hiện:
 
-> Spread phải giúp structure đó luôn đẹp, rõ và dễ bám theo.
+> Nodestar phải giúp structure đó luôn đẹp, rõ và dễ bám theo.
 
 ---
 
@@ -2998,4 +3134,4 @@ V1 thành công nếu user có thể:
 7. giữ những thứ chưa muốn organize trong Seed Box;
 8. quay lại một graph sau thời gian dài và vẫn hiểu cấu trúc;
 9. thao tác drag/pan/zoom mượt;
-10. cảm nhận Spread là một product được thiết kế rất có chủ đích, không phải một generic graph editor.
+10. cảm nhận Nodestar là một product được thiết kế rất có chủ đích, không phải một generic graph editor.

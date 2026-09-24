@@ -15,19 +15,14 @@ export function quarantineMissingAssetReferences(
   availableAssetIds: ReadonlySet<string>,
 ) {
   const missing = new Set<string>();
-  let changed = false;
-  const objects = map.objects.map((object) => {
-    const images = object.images.filter((id) => {
-      const available = availableAssetIds.has(id);
-      if (!available) missing.add(id);
-      return available;
-    });
-    if (images.length === object.images.length) return object;
-    changed = true;
-    return { ...object, images };
-  });
+  for (const object of map.objects)
+    for (const id of object.images)
+      if (!availableAssetIds.has(id)) missing.add(id);
+  // An unavailable asset is a storage/read problem, never permission to
+  // mutate the user's map. Keeping the reference lets a later IndexedDB read
+  // recover the image and guarantees ordinary map edits cannot erase it.
   return {
-    map: changed ? { ...map, objects } : map,
+    map,
     missing: [...missing],
   };
 }

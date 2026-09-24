@@ -1,6 +1,6 @@
 {
-  "name": "SPREAD — Vision Mapping",
-  "short_name": "SPREAD",
+  "name": "Nodestar — Vision Mapping",
+  "short_name": "Nodestar",
   "description": "A personal space for interconnected paths, goals and imagination.",
   "start_url": "/",
   "scope": "/",
@@ -9,16 +9,22 @@
   "theme_color": "#4568b9",
   "icons": [
     {
-      "sizes": "192x192",
-      "purpose": "any",
       "src": "/icon-192.png",
-      "type": "image/png"
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "sizes": "512x512",
-      "purpose": "any",
       "src": "/icon-512.png",
-      "type": "image/png"
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

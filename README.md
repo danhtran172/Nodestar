@@ -1,6 +1,6 @@
-# SPREAD
+# Nodestar
 
-A personal vision map for Windows and the web, implemented from [the V1 product specification](docs/SPREAD-V1.md).
+A personal vision map for Windows and the web, implemented from [the V1 product specification](docs/NODESTAR-V1.md).
 
 ## Run
 
@@ -23,7 +23,9 @@ npm.cmd start
 
 ## Windows app
 
-Open the hosted application in Edge or Chrome, then select **Install SPREAD** in the map menu when offered, or use the browser's install-app action. It runs in a standalone window. No native installer is required. Offline installation requires an initial successful online load of the production build.
+`Run-Nodestar.cmd` installs dependencies on first use, starts the dev server and opens Nodestar as a Chrome app window once it is ready (pass `--no-open` to skip the window). `Nodestar.lnk` and `Nodestar - Run Test.lnk` are desktop-style shortcuts for the same script, the second passing `--test` to run the domain test suite.
+
+Open the hosted application in Edge or Chrome, then select **Install Nodestar** in the map menu when offered, or use the browser's install-app action. It runs in a standalone window. No native installer is required. Offline installation requires an initial successful online load of the production build.
 
 ## Interaction
 
@@ -41,7 +43,9 @@ Open the hosted application in Edge or Chrome, then select **Install SPREAD** in
 
 React/Vinext, TypeScript, SVG edges, DOM canvas objects, IndexedDB maps and image assets. Local storage maintains a synchronous text recovery copy. Graph operations are pure and undo transactions contain both layout and semantic state. Images are resized to thumbnails; originals are loaded in the viewer. The central anchor is independent of PATH semantics.
 
-Data belongs to the current browser profile and origin. There is no cross-device server synchronization. Export a `.spread.json` backup from the map menu before changing browsers, devices, or clearing browser storage. Asset records remain available to undo and duplicate operations; they are not immediately hard-deleted.
+Data belongs to the current browser profile and origin. There is no cross-device server synchronization. Export a `.nodestar.json` backup from the map menu before changing browsers, devices, or clearing browser storage. Asset records remain available to undo and duplicate operations; they are not immediately hard-deleted.
+
+This application was previously called SPREAD. Maps, images and preferences saved under the old name are copied into the renamed storage the first time Nodestar opens, and `.spread.json` backups still restore. The old `spread-workspace` database is left in place as a fallback; clear it from the browser's site data once the migrated maps look right.
 
 ## Validation and limits
 

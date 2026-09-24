@@ -1,0 +1,316 @@
+
+> spread@0.1.0 test
+> node --experimental-strip-types --test tests/*.test.mjs
+
+TAP version 13
+# (node:27692) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: single-clicking a non-leaf node selects only the clicked node
+ok 1 - single-clicking a non-leaf node selects only the clicked node
+  ---
+  duration_ms: 1.9679
+  ...
+# Subtest: single-clicking non-node objects selects and moves exactly one object
+ok 2 - single-clicking non-node objects selects and moves exactly one object
+  ---
+  duration_ms: 0.4331
+  ...
+# Subtest: explicit selection suppresses implicit downstream expansion
+ok 3 - explicit selection suppresses implicit downstream expansion
+  ---
+  duration_ms: 0.2085
+  ...
+# Subtest: ctrl-click toggles a copy and does not start a drag
+ok 4 - ctrl-click toggles a copy and does not start a drag
+  ---
+  duration_ms: 0.3191
+  ...
+# Subtest: selection callback set is isolated from the movement set
+ok 5 - selection callback set is isolated from the movement set
+  ---
+  duration_ms: 0.2424
+  ...
+# (node:25024) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: fades a crossing node, but never the source or target
+ok 6 - fades a crossing node, but never the source or target
+  ---
+  duration_ms: 7.832
+  ...
+# Subtest: does not fade nodes that do not cross the curve
+ok 7 - does not fade nodes that do not cross the curve
+  ---
+  duration_ms: 0.92
+  ...
+# Subtest: finds both covering nodes and a narrow intersection between samples
+ok 8 - finds both covering nodes and a narrow intersection between samples
+  ---
+  duration_ms: 1.9377
+  ...
+# (node:29528) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a copied selection is a valid independent map
+ok 9 - a copied selection is a valid independent map
+  ---
+  duration_ms: 6.1407
+  ...
+# Subtest: import rejects invalid IDs, roles, capacities and missing endpoints
+ok 10 - import rejects invalid IDs, roles, capacities and missing endpoints
+  ---
+  duration_ms: 1.3037
+  ...
+# Subtest: local reflow preserves other branches and goal anchors
+ok 11 - local reflow preserves other branches and goal anchors
+  ---
+  duration_ms: 1.6072
+  ...
+# Subtest: seed layout is stable, bounded and accommodates long text
+ok 12 - seed layout is stable, bounded and accommodates long text
+  ---
+  duration_ms: 2.7804
+  ...
+# Subtest: 500-node shared downstream traversal and movement remain exact
+ok 13 - 500-node shared downstream traversal and movement remain exact
+  ---
+  duration_ms: 7.1392
+  ...
+# 500-node traversal and movement: 0.97 ms (domain engine only).
+# Subtest: reject cycles, self relations and mixed duplicates
+ok 14 - reject cycles, self relations and mixed duplicates
+  ---
+  duration_ms: 0.5432
+  ...
+# Subtest: goal plus adds contributor; normal plus points outward
+ok 15 - goal plus adds contributor; normal plus points outward
+  ---
+  duration_ms: 0.7594
+  ...
+# Subtest: delete reconnects surviving boundaries through multi-deletion
+ok 16 - delete reconnects surviving boundaries through multi-deletion
+  ---
+  duration_ms: 0.8952
+  ...
+# Subtest: ambiguous deletion is rejected
+ok 17 - ambiguous deletion is rejected
+  ---
+  duration_ms: 1.3156
+  ...
+# Subtest: duplicate only includes internal edges
+ok 18 - duplicate only includes internal edges
+  ---
+  duration_ms: 3.4919
+  ...
+# Subtest: reparent preserves additional incoming and downstream edges
+ok 19 - reparent preserves additional incoming and downstream edges
+  ---
+  duration_ms: 1.4812
+  ...
+# Subtest: reverse checks alternate route for cycles
+ok 20 - reverse checks alternate route for cycles
+  ---
+  duration_ms: 0.5809
+  ...
+# Subtest: seed capacity promotion, transfer, and conversion preserve content
+ok 21 - seed capacity promotion, transfer, and conversion preserve content
+  ---
+  duration_ms: 5.3003
+  ...
+# Subtest: type restrictions and reference direction
+ok 22 - type restrictions and reference direction
+  ---
+  duration_ms: 0.4496
+  ...
+# (node:29600) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: image paste is rejected only when more than one object is selected
+ok 23 - image paste is rejected only when more than one object is selected
+  ---
+  duration_ms: 1.8289
+  ...
+# Subtest: missing image references are quarantined without mutating valid objects
+ok 24 - missing image references are quarantined without mutating valid objects
+  ---
+  duration_ms: 1.1049
+  ...
+# (node:15080) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: ordinary branch drag resolves full-bounds collision locally
+ok 25 - ordinary branch drag resolves full-bounds collision locally
+  ---
+  duration_ms: 3.9748
+  ...
+# Subtest: re-parent changes one attachment and preserves other relationships
+ok 26 - re-parent changes one attachment and preserves other relationships
+  ---
+  duration_ms: 0.7603
+  ...
+# Subtest: shared downstream and goals retain their relative offsets
+ok 27 - shared downstream and goals retain their relative offsets
+  ---
+  duration_ms: 0.4265
+  ...
+# Subtest: explicit selection moves only selected objects and never re-parents
+ok 28 - explicit selection moves only selected objects and never re-parents
+  ---
+  duration_ms: 1.0888
+  ...
+# Subtest: invalid circular re-parent never changes semantics
+ok 29 - invalid circular re-parent never changes semantics
+  ---
+  duration_ms: 0.5442
+  ...
+# Subtest: predictive output is deterministic and preserves unrelated identity
+ok 30 - predictive output is deterministic and preserves unrelated identity
+  ---
+  duration_ms: 1.0415
+  ...
+# (node:28788) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D-093/D-094: nearest side locks until leave, including during drag
+ok 31 - D-093/D-094: nearest side locks until leave, including during drag
+  ---
+  duration_ms: 4.4664
+  ...
+# Subtest: D-008/D-041/D-095: source-to-target PATH preserves all positions and content
+ok 32 - D-008/D-041/D-095: source-to-target PATH preserves all positions and content
+  ---
+  duration_ms: 2.2707
+  ...
+# Subtest: D-012/D-095: canonical self, duplicate, type and cycle rejection
+ok 33 - D-012/D-095: canonical self, duplicate, type and cycle rejection
+  ---
+  duration_ms: 1.1587
+  ...
+# Subtest: cancel, Escape, pointercancel, empty drop, deletion and cleanup have no commit
+ok 34 - cancel, Escape, pointercancel, empty drop, deletion and cleanup have no commit
+  ---
+  duration_ms: 0.3284
+  ...
+# Subtest: D-043: removing the new relation preserves both Nodes
+ok 35 - D-043: removing the new relation preserves both Nodes
+  ---
+  duration_ms: 0.5163
+  ...
+# Subtest: commit revalidates against graph changes made after the preview
+ok 36 - commit revalidates against graph changes made after the preview
+  ---
+  duration_ms: 0.2497
+  ...
+# Subtest: D-094: preview begins at the locked source boundary and ends at target boundary
+ok 37 - D-094: preview begins at the locked source boundary and ends at target boundary
+  ---
+  duration_ms: 0.5729
+  ...
+# Subtest: V1 source and README contain no WebMCP registration path
+ok 38 - V1 source and README contain no WebMCP registration path
+  ---
+  duration_ms: 9.1342
+  ...
+# (node:4464) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 1 seeds remain deterministic, bounded and collision-free at 240px
+ok 39 - 1 seeds remain deterministic, bounded and collision-free at 240px
+  ---
+  duration_ms: 2.936
+  ...
+# Subtest: 1 seeds remain deterministic, bounded and collision-free at 480px
+ok 40 - 1 seeds remain deterministic, bounded and collision-free at 480px
+  ---
+  duration_ms: 0.4563
+  ...
+# Subtest: 10 seeds remain deterministic, bounded and collision-free at 240px
+ok 41 - 10 seeds remain deterministic, bounded and collision-free at 240px
+  ---
+  duration_ms: 2.1595
+  ...
+# Subtest: 10 seeds remain deterministic, bounded and collision-free at 480px
+ok 42 - 10 seeds remain deterministic, bounded and collision-free at 480px
+  ---
+  duration_ms: 0.6814
+  ...
+# Subtest: 11 seeds remain deterministic, bounded and collision-free at 240px
+ok 43 - 11 seeds remain deterministic, bounded and collision-free at 240px
+  ---
+  duration_ms: 0.6311
+  ...
+# Subtest: 11 seeds remain deterministic, bounded and collision-free at 480px
+ok 44 - 11 seeds remain deterministic, bounded and collision-free at 480px
+  ---
+  duration_ms: 1.0333
+  ...
+# Subtest: 20 seeds remain deterministic, bounded and collision-free at 240px
+ok 45 - 20 seeds remain deterministic, bounded and collision-free at 240px
+  ---
+  duration_ms: 0.8596
+  ...
+# Subtest: 20 seeds remain deterministic, bounded and collision-free at 480px
+ok 46 - 20 seeds remain deterministic, bounded and collision-free at 480px
+  ---
+  duration_ms: 0.8281
+  ...
+# Subtest: 21 seeds remain deterministic, bounded and collision-free at 240px
+ok 47 - 21 seeds remain deterministic, bounded and collision-free at 240px
+  ---
+  duration_ms: 0.6722
+  ...
+# Subtest: 21 seeds remain deterministic, bounded and collision-free at 480px
+ok 48 - 21 seeds remain deterministic, bounded and collision-free at 480px
+  ---
+  duration_ms: 0.8037
+  ...
+# Subtest: 30 seeds remain deterministic, bounded and collision-free at 240px
+ok 49 - 30 seeds remain deterministic, bounded and collision-free at 240px
+  ---
+  duration_ms: 0.6463
+  ...
+# Subtest: 30 seeds remain deterministic, bounded and collision-free at 480px
+ok 50 - 30 seeds remain deterministic, bounded and collision-free at 480px
+  ---
+  duration_ms: 0.549
+  ...
+# Subtest: shuffle advances deterministically and produces a new composition
+ok 51 - shuffle advances deterministically and produces a new composition
+  ---
+  duration_ms: 1.3379
+  ...
+# (node:13220) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: newer database revision wins over local recovery
+ok 52 - newer database revision wins over local recovery
+  ---
+  duration_ms: 1.2724
+  ...
+# Subtest: newer local recovery wins over database
+ok 53 - newer local recovery wins over database
+  ---
+  duration_ms: 0.2521
+  ...
+# Subtest: database wins equal revision ties by freshness
+ok 54 - database wins equal revision ties by freshness
+  ---
+  duration_ms: 0.1567
+  ...
+# Subtest: legacy maps migrate in memory at the lowest revision
+ok 55 - legacy maps migrate in memory at the lowest revision
+  ---
+  duration_ms: 0.5043
+  ...
+# Subtest: invalid envelope is rejected independently
+ok 56 - invalid envelope is rejected independently
+  ---
+  duration_ms: 0.5458
+  ...
+# Subtest: no valid candidates returns null so the caller can use demo data
+ok 57 - no valid candidates returns null so the caller can use demo data
+  ---
+  duration_ms: 0.1686
+  ...
+1..57
+# tests 57
+# suites 0
+# pass 57
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 393.91

@@ -4,7 +4,7 @@ export type CanvasCommitSample = {
   commitTime: number;
 };
 
-export type SpreadPerformanceProbe = {
+export type NodestarPerformanceProbe = {
   objectRenders: number;
   edgeRenders: number;
   commits: CanvasCommitSample[];
@@ -12,14 +12,14 @@ export type SpreadPerformanceProbe = {
 
 declare global {
   interface Window {
-    __spreadPerformanceProbe?: SpreadPerformanceProbe;
+    __nodestarPerformanceProbe?: NodestarPerformanceProbe;
   }
 }
 
 function probe() {
   return typeof window === 'undefined'
     ? undefined
-    : window.__spreadPerformanceProbe;
+    : window.__nodestarPerformanceProbe;
 }
 
 export function recordObjectRender() {

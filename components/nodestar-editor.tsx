@@ -2,7 +2,7 @@
 /* oxlint-disable react/react-compiler -- External browser and synchronous graph transactions intentionally use refs; React compiler is not enabled. */
 /* oxlint-disable next/no-img-element -- The explicit viewer renders a local original image rather than fetching or optimizing remotely. */
 /* oxlint-disable jsx-a11y/no-autofocus -- Seed creation is an explicit keyboard entry flow; focus returns through the dialog/popover primitive. */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus,
   MousePointer2,
@@ -32,6 +32,10 @@ import {
   FilePlus2,
   Maximize2,
   Minus,
+  Workflow,
+  LayoutGrid,
+  Wand2,
+  ArrowRight,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -70,17 +74,29 @@ import {
   PopoverTitle,
 } from '@/components/ui/popover';
 import { Toaster, toast } from '@/components/ui/toast';
-import { SpreadCanvas } from '@/components/spread-canvas';
-import type { Viewport } from '@/components/spread-canvas';
+import { NodestarCanvas } from '@/components/nodestar-canvas';
+import type { Viewport } from '@/components/nodestar-canvas';
+import {
+  autoLayout,
+  graphHierarchy,
+  graphSubtree,
+  hiddenObjects,
+  sameMap,
+} from '@/lib/auto-layout';
+import type { LayoutMode } from '@/lib/auto-layout';
 import { ObjectDetails } from '@/components/object-details';
 import { useWorkspace } from '@/hooks/use-workspace';
 import {
+  convertObject,
+  defaultTitle,
   makeObject,
   objectHeight,
   patchObject,
   branch,
   connect,
-  reachable,
+  downstream,
+  pathDirection,
+  syncTitleFromGoal,
   deletionError,
   deleteObjects,
   removeEdge,
@@ -92,7 +108,7 @@ import {
   moveSeed,
   moveObjects,
   validateMap,
-  nextVisualShuffle,
+  shuffleSeeds,
   imaginationDimensions,
 } from '@/lib/graph';
 import type { VisionMap, CanvasObject, Kind, Point } from '@/lib/graph';
@@ -106,13 +122,33 @@ const labels = {
   GOAL: 'Goal',
   SEED_BOX: 'Seed Box',
   IMAGINATION: 'Imagination',
+  GRAPH: 'Graph',
 };
 const icons = {
   NODE: Circle,
   GOAL: Target,
   SEED_BOX: Sprout,
   IMAGINATION: ImageIcon,
+  GRAPH: Network,
 };
+/** The central goal a map is known by, which is all a Graph object shows. */
+export function centralGoalText(entry: { title: string; map: VisionMap }) {
+  const goal =
+    entry.map.objects.find((o) => o.id === entry.map.anchorId) ||
+    entry.map.objects.find((o) => o.role === 'GOAL');
+  return goal?.text.trim() || entry.title;
+}
+/** A brand new graph: one central goal and nothing else yet. */
+function seedGraphMap(title: string): VisionMap {
+  const goal = makeObject('NODE', { x: 0, y: 0 }, 'GOAL', title);
+  return {
+    version: 1,
+    title,
+    anchorId: goal.id,
+    objects: [goal],
+    relationships: [],
+  };
+}
 type PendingImageRequest = {
   asset: Asset;
   destinationId: string;
@@ -124,16 +160,13 @@ type PendingImageRequest = {
 };
 
 function applyImageReference(map: VisionMap, request: PendingImageRequest) {
-  let target = map.objects.find((object) => object.id === request.destinationId);
+  let target = map.objects.find(
+    (object) => object.id === request.destinationId,
+  );
   let next = map;
   if (!target && request.createAt) {
     target = freePosition(map, {
-      ...makeObject(
-        'IMAGINATION',
-        request.createAt,
-        'NORMAL',
-        'Imagination',
-      ),
+      ...makeObject('IMAGINATION', request.createAt, 'NORMAL', 'Imagination'),
       id: request.destinationId,
     });
     next = { ...map, objects: [...map.objects, target] };
@@ -150,37 +183,58 @@ function applyImageReference(map: VisionMap, request: PendingImageRequest) {
   return patchObject(next, target.id, {
     images,
     ...(target.type === 'IMAGINATION'
-      ? imaginationDimensions(images.length, target.imaginationPreset)
+      ? imaginationDimensions(
+          images.length,
+          target.imaginationPreset,
+          target.imaginationLayout,
+        )
       : {}),
   });
 }
-function MapPreview({ map }: { map: VisionMap }) {
-  if (!map.objects.length) return <div className="map-preview empty">Empty canvas</div>;
-  const left = Math.min(...map.objects.map((object) => object.x));
-  const top = Math.min(...map.objects.map((object) => object.y));
-  const right = Math.max(...map.objects.map((object) => object.x + object.width));
-  const bottom = Math.max(...map.objects.map((object) => object.y + objectHeight(object)));
-  const scale = Math.min(112 / Math.max(1, right - left), 62 / Math.max(1, bottom - top));
-  return (
-    <div className="map-preview" aria-label={`Preview of ${map.title}`}>
-      {map.objects.map((object) => (
-        <i
-          key={object.id}
-          className={`${object.type.toLowerCase()} ${object.role.toLowerCase()}`}
-          style={{
-            left: 6 + (object.x - left) * scale,
-            top: 6 + (object.y - top) * scale,
-            width: Math.max(7, object.width * scale),
-            height: Math.max(6, objectHeight(object) * scale),
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-export default function SpreadEditor() {
+export default function NodestarEditor() {
   const ws = useWorkspace(),
-    { map, commit, undo, redo, assets, setAssets, saveViewport } = ws;
+    { map, undo, redo, assets, setAssets, saveViewport } = ws;
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('graph'),
+    [layoutReady, setLayoutReady] = useState(false);
+  const layoutModeRef = useRef(layoutMode);
+  layoutModeRef.current = layoutMode;
+  const rawCommit = ws.commit,
+    rawCommitWithAssets = ws.commitWithAssets;
+  /**
+   * Graph mode re-flows on every commit rather than on a single sort button:
+   * the layout is idempotent, so a commit that already sits on the columns
+   * passes through untouched and text, size and structure edits all stay
+   * ranked without a second pass.
+   */
+  const settle = useCallback((before: VisionMap, next: VisionMap) => {
+    if (layoutModeRef.current !== 'graph') return next;
+    const sorted = autoLayout(next);
+    // A drag that lands back on its own frame changes nothing once the graph
+    // re-flows, so it does not earn an undo step.
+    return sameMap(before, sorted) ? before : sorted;
+  }, []);
+  const commit = useCallback(
+    (change: VisionMap | ((m: VisionMap) => VisionMap)) =>
+      rawCommit((m) =>
+        settle(
+          m,
+          // An unnamed map takes the name its central goal is first given.
+          syncTitleFromGoal(m, typeof change === 'function' ? change(m) : change),
+        ),
+      ),
+    [rawCommit, settle],
+  );
+  /** An image changes a card's height, so an asset commit re-packs too. */
+  const commitWithAssets = useCallback(
+    (
+      durableAssets: readonly Asset[],
+      change: VisionMap | ((m: VisionMap) => VisionMap),
+    ) =>
+      rawCommitWithAssets(durableAssets, (m) =>
+        settle(m, typeof change === 'function' ? change(m) : change),
+      ),
+    [rawCommitWithAssets, settle],
+  );
   const [selected, setSelected] = useState(new Set<string>()),
     [explicit, setExplicit] = useState(false),
     [edge, setEdge] = useState(''),
@@ -199,6 +253,14 @@ export default function SpreadEditor() {
     [search, setSearch] = useState(false),
     [seedBox, setSeedBox] = useState(''),
     [seedText, setSeedText] = useState('');
+  const [graphPicker, setGraphPicker] = useState<
+      | { mode: 'branch'; parentId: string }
+      | { mode: 'create'; point?: Point }
+      | { mode: 'convert'; id: string }
+      | null
+    >(null),
+    [newGraphTitle, setNewGraphTitle] = useState(''),
+    [openGraph, setOpenGraph] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Set<string> | null>(null),
     [help, setHelp] = useState(false),
     [viewer, setViewer] = useState(''),
@@ -218,6 +280,23 @@ export default function SpreadEditor() {
     clipboard = useRef<VisionMap | null>(null),
     didFit = useRef(false),
     openedMap = useRef('');
+  // What every Graph object shows: the central goal of the map it links to.
+  const linkedTitles = useMemo(
+    () =>
+      Object.fromEntries(
+        ws.maps.map((entry) => [entry.id, centralGoalText(entry)]),
+      ),
+    [ws.maps],
+  );
+  // Folded branches are not on screen, so nothing that frames the canvas or
+  // counts what is on it should include them.
+  const onScreen = useMemo(() => {
+    if (!map) return [];
+    const folded = hiddenObjects(map);
+    return folded.size
+      ? map.objects.filter((o) => !folded.has(o.id))
+      : map.objects;
+  }, [map]);
   const obj = map?.objects.find((o) => selected.has(o.id)),
     one = selected.size === 1 ? obj : undefined;
   const edgeObject = map?.relationships.find((e) => e.id === edge);
@@ -289,13 +368,21 @@ export default function SpreadEditor() {
     if (!map || openedMap.current === ws.activeMapId) return;
     openedMap.current = ws.activeMapId;
     didFit.current = true;
-    const saved = ws.maps.find((entry) => entry.id === ws.activeMapId)?.viewport;
-    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) && saved.zoom >= 0.18 && saved.zoom <= 2.5) {
+    const saved = ws.maps.find(
+      (entry) => entry.id === ws.activeMapId,
+    )?.viewport;
+    if (
+      saved &&
+      Number.isFinite(saved.x) &&
+      Number.isFinite(saved.y) &&
+      saved.zoom >= 0.18 &&
+      saved.zoom <= 2.5
+    ) {
       setViewport(saved);
       return;
     }
-    fit(map.objects);
-  }, [map, fit, ws.activeMapId, ws.maps]);
+    fit(onScreen);
+  }, [map, onScreen, fit, ws.activeMapId, ws.maps]);
   useEffect(() => {
     if (didFit.current) {
       const t = setTimeout(() => {
@@ -306,14 +393,47 @@ export default function SpreadEditor() {
   }, [viewport, saveViewport]);
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('spread-canvas-theme');
+      const stored =
+        localStorage.getItem('nodestar-canvas-theme') ??
+        localStorage.getItem('spread-canvas-theme');
       if (stored === 'paper' || stored === 'mist' || stored === 'night')
         setTheme(stored);
     } catch {}
   }, []);
   useEffect(() => {
-    try { localStorage.setItem('spread-canvas-theme', theme); } catch {}
+    try { localStorage.setItem('nodestar-canvas-theme', theme); } catch {}
   }, [theme]);
+  useEffect(() => {
+    try {
+      const stored =
+        localStorage.getItem('nodestar-layout-mode') ??
+        localStorage.getItem('spread-layout-mode');
+      if (stored === 'canvas' || stored === 'graph') setLayoutMode(stored);
+    } catch {}
+    // Sorting waits for the stored choice so a canvas-mode map is never
+    // re-flowed for one frame on the way back in.
+    setLayoutReady(true);
+  }, []);
+  useEffect(() => {
+    if (!layoutReady) return;
+    try {
+      localStorage.setItem('nodestar-layout-mode', layoutMode);
+    } catch {}
+  }, [layoutMode, layoutReady]);
+  const sortNow = useCallback(() => {
+    const base = ws.current.current;
+    if (!base) return false;
+    const next = autoLayout(base);
+    if (next === base) return false;
+    rawCommit(next);
+    return true;
+  }, [rawCommit, ws.current]);
+  // Runs when graph mode is entered and when another map is opened. Later
+  // edits need no watcher here because every commit already re-flows.
+  const mapLoaded = !!map;
+  useEffect(() => {
+    if (layoutReady && layoutMode === 'graph' && mapLoaded) sortNow();
+  }, [layoutReady, layoutMode, mapLoaded, ws.activeMapId, sortNow]);
   useEffect(() => {
     const change = () => setOnline(navigator.onLine);
     change();
@@ -335,6 +455,16 @@ export default function SpreadEditor() {
   function patch(id: string, changes: Partial<CanvasObject>) {
     commit((m) => patchObject(m, id, changes));
   }
+  /** Sets which way new PATH arrows point; paths already drawn are untouched. */
+  function setPathDirection(direction: 'outward' | 'inward') {
+    if (!map || pathDirection(map) === direction) return;
+    commit((m) => ({ ...m, pathDirection: direction }));
+    notify(
+      direction === 'outward'
+        ? 'New arrows point away from the goal. Existing paths keep their direction.'
+        : 'New arrows point toward the goal. Existing paths keep their direction.',
+    );
+  }
   function newMap() {
     ws.createMap({
       ...map!,
@@ -352,11 +482,16 @@ export default function SpreadEditor() {
   function duplicateMap(id: string) {
     const source = ws.maps.find((entry) => entry.id === id);
     if (!source) return;
-    const ids = new Map(source.map.objects.map((object) => [object.id, crypto.randomUUID()]));
+    const ids = new Map(
+      source.map.objects.map((object) => [object.id, crypto.randomUUID()]),
+    );
     ws.createMap({
       ...source.map,
       title: `${source.title} copy`,
-      objects: source.map.objects.map((object) => ({ ...object, id: ids.get(object.id)! })),
+      objects: source.map.objects.map((object) => ({
+        ...object,
+        id: ids.get(object.id)!,
+      })),
       relationships: source.map.relationships.map((relationship) => ({
         ...relationship,
         id: crypto.randomUUID(),
@@ -372,7 +507,12 @@ export default function SpreadEditor() {
     type: Kind,
     role: CanvasObject['role'] = 'NORMAL',
     point = center(),
+    link?: { mapRef: string; title: string },
   ) {
+    if (type === 'GRAPH' && !link) {
+      setGraphPicker({ mode: 'create', point });
+      return;
+    }
     const base = ws.current.current;
     if (!base) return;
     const o = freePosition(
@@ -381,11 +521,8 @@ export default function SpreadEditor() {
         type,
         { x: point.x - 105, y: point.y - 40 },
         role,
-        type === 'SEED_BOX'
-          ? 'Loose ideas'
-          : type === 'IMAGINATION'
-            ? 'Imagination'
-            : '',
+        link?.title ?? defaultTitle(type),
+        link?.mapRef,
       ),
     );
     const next = {
@@ -403,27 +540,132 @@ export default function SpreadEditor() {
       setEditing(o.id);
     } else {
       commit(next);
-      setDetail(o.id);
+      if (type !== 'GRAPH') setDetail(o.id);
     }
   }
-  function addBranch(id: string) {
+  function addBranch(
+    id: string,
+    type: Kind = 'NODE',
+    role: CanvasObject['role'] = 'NORMAL',
+    link?: { mapRef: string; title: string },
+  ) {
+    // A Graph object is nothing without the map it opens, so the link is
+    // chosen before the object exists.
+    if (type === 'GRAPH' && !link) {
+      setGraphPicker({ mode: 'branch', parentId: id });
+      return;
+    }
     act(() => {
       const base = ws.current.current;
       if (!base) return;
-      const r = branch(base, id);
-      draftRef.current = r.map;
-      setDraft(r.map);
-      setEditing(r.object.id);
+      const r = branch(base, id, type, role, link);
       setSelected(new Set([r.object.id]));
       setExplicit(false);
+      // A node opens straight into its title; the other kinds arrive named and
+      // open their details, the same way the Create menu makes them.
+      if (type === 'NODE') {
+        draftRef.current = r.map;
+        setDraft(r.map);
+        setEditing(r.object.id);
+      } else {
+        commit(r.map);
+        if (type !== 'GRAPH') setDetail(r.object.id);
+      }
     });
+  }
+  /**
+   * Folds a branch away, or brings it back. A card that is folded out of sight
+   * cannot stay selected: acting on something invisible is how work gets lost.
+   */
+  function fold(id: string, collapsed: boolean) {
+    commit((m) => patchObject(m, id, { collapsed: collapsed || undefined }));
+    if (!collapsed) return;
+    const base = ws.current.current;
+    if (!base) return;
+    const branchIds = graphSubtree(graphHierarchy(base), id);
+    setSelected((current) => {
+      const kept = new Set(
+        [...current].filter((item) => item === id || !branchIds.has(item)),
+      );
+      return kept.size === current.size ? current : kept;
+    });
+    setDetail((current) =>
+      current !== id && branchIds.has(current) ? '' : current,
+    );
+    setEditing((current) =>
+      current !== id && branchIds.has(current) ? '' : current,
+    );
+  }
+  /** Unfolds whatever is holding `id` out of sight, so it can be looked at. */
+  function reveal(id: string) {
+    const base = ws.current.current;
+    if (!base || !hiddenObjects(base).has(id)) return;
+    const hierarchy = graphHierarchy(base);
+    const holding = new Set<string>();
+    let step = hierarchy.parentOf.get(id) ?? null;
+    while (step) {
+      holding.add(step);
+      step = hierarchy.parentOf.get(step) ?? null;
+    }
+    commit((m) => ({
+      ...m,
+      objects: m.objects.map((o) =>
+        o.collapsed && holding.has(o.id) ? { ...o, collapsed: undefined } : o,
+      ),
+    }));
+  }
+  function convert(
+    id: string,
+    type: Kind,
+    role: CanvasObject['role'],
+    mapRef?: string,
+  ) {
+    if (type === 'GRAPH' && !mapRef) {
+      setGraphPicker({ mode: 'convert', id });
+      return;
+    }
+    act(() => {
+      commit((m) => convertObject(m, id, type, role, mapRef));
+      setDetail((current) => (current === id ? '' : current));
+    });
+  }
+  /**
+   * Applies the graph a Graph object was linked to, whatever started it. A map
+   * made a moment ago is not in `linkedTitles` yet, so its goal is passed in.
+   */
+  function linkGraph(mapRef: string, goal?: string) {
+    const picker = graphPicker;
+    setGraphPicker(null);
+    setNewGraphTitle('');
+    if (!picker) return;
+    const title = goal || linkedTitles[mapRef] || 'Untitled graph';
+    if (picker.mode === 'branch')
+      addBranch(picker.parentId, 'GRAPH', 'NORMAL', { mapRef, title });
+    else if (picker.mode === 'create')
+      beginNew('GRAPH', 'NORMAL', picker.point, { mapRef, title });
+    else
+      act(() => {
+        commit((m) => convertObject(m, picker.id, 'GRAPH', 'NORMAL', mapRef));
+        commit((m) => patchObject(m, picker.id, { text: title }));
+      });
+  }
+  /** Makes the graph a Graph object will open, then links to it. */
+  function linkNewGraph() {
+    const title = newGraphTitle.trim();
+    if (!title) return;
+    const mapRef = ws.createLinkedMap(title, seedGraphMap(title));
+    if (!mapRef) {
+      notify('This workspace is still loading. Try again in a moment.');
+      return;
+    }
+    linkGraph(mapRef, title);
   }
   function saveText(id: string, text: string, cancel = false) {
     const pending = draftRef.current;
     draftRef.current = null;
     setDraft(null);
     setEditing('');
-    if (cancel || !text.trim()) {
+    if (cancel) {
       if (pending) setSelected(new Set());
       if (ws.current.current) ws.saveDraft(ws.current.current);
       return;
@@ -480,7 +722,7 @@ export default function SpreadEditor() {
     if (!map || !selected.size) return;
     clipboard.current = copySelection(map, selected);
     navigator.clipboard
-      ?.writeText(JSON.stringify({ spreadSelection: clipboard.current }))
+      ?.writeText(JSON.stringify({ nodestarSelection: clipboard.current }))
       .catch(() => {});
     notify(`${selected.size} object${selected.size > 1 ? 's' : ''} copied`);
   }
@@ -542,7 +784,7 @@ export default function SpreadEditor() {
         error: undefined,
       },
     }));
-    const saved = await ws.commitWithAssets([request.asset], (current) =>
+    const saved = await commitWithAssets([request.asset], (current) =>
       applyImageReference(current, request),
     );
     if (!saved) {
@@ -622,7 +864,7 @@ export default function SpreadEditor() {
     if (!map) return;
     const used = new Set(map.objects.flatMap((o) => o.images));
     const data = {
-      spreadBackup: 1,
+      nodestarBackup: 1,
       map,
       assets: Object.fromEntries(
         Object.entries(assets).filter(([id]) => used.has(id)),
@@ -633,27 +875,28 @@ export default function SpreadEditor() {
     );
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${map.title.replace(/[^a-z0-9 -]/gi, '').trim() || 'spread'}.spread.json`;
+    a.download = `${map.title.replace(/[^a-z0-9 -]/gi, '').trim() || 'nodestar'}.nodestar.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async function importMap(file: File) {
     try {
       const value = JSON.parse(await file.text());
+      const backupVersion = value.nodestarBackup ?? value.spreadBackup;
       if (
-        value.spreadBackup !== 1 ||
+        backupVersion !== 1 ||
         value.map?.version !== 1 ||
         !Array.isArray(value.map.objects) ||
         !Array.isArray(value.map.relationships)
       )
-        throw Error('Choose a SPREAD backup file.');
+        throw Error('Choose a Nodestar backup file.');
       const m = validateMap(value.map);
       for (const o of m.objects)
         for (const id of o.images)
           if (!value.assets?.[id]?.preview?.startsWith('data:image/'))
             throw Error('This backup is missing an image.');
       const imported = Object.values(value.assets || {}) as Asset[];
-      if (!(await ws.commitWithAssets(imported, m)))
+      if (!(await commitWithAssets(imported, m)))
         throw Error('The backup could not be saved on this device.');
       setAssets((current) => ({
         ...current,
@@ -754,6 +997,13 @@ export default function SpreadEditor() {
       }
       if (!mod && key === 'v') setMode('select');
       if (!mod && key === 'h') setMode('pan');
+      if (!mod && key === 'g') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (layoutMode !== 'graph') setLayoutMode('graph');
+          else if (!sortNow()) notify('The graph is already sorted.');
+        } else setLayoutMode(layoutMode === 'graph' ? 'canvas' : 'graph');
+      }
       if (!mod && (key === '+' || key === '=')) {
         e.preventDefault();
         if (one?.type === 'NODE') addBranch(one.id);
@@ -762,7 +1012,7 @@ export default function SpreadEditor() {
       if (!mod && key === '-') zoom(1 / 1.15);
       if (mod && key === '0') {
         e.preventDefault();
-        fit(map?.objects || []);
+        fit(onScreen);
       }
       if (e.key.startsWith('Arrow') && selected.size) {
         e.preventDefault();
@@ -798,9 +1048,10 @@ export default function SpreadEditor() {
       }
       try {
         const parsed = JSON.parse(e.clipboardData?.getData('text/plain') || '');
-        if (parsed.spreadSelection?.objects?.length) {
+        const selection = parsed.nodestarSelection ?? parsed.spreadSelection;
+        if (selection?.objects?.length) {
           e.preventDefault();
-          const source = validateMap(parsed.spreadSelection);
+          const source = validateMap(selection);
           if (source.objects.some((o) => o.images.some((id) => !assets[id])))
             throw Error(
               'Paste this selection in its original workspace, or use a backup to transfer images.',
@@ -823,7 +1074,7 @@ export default function SpreadEditor() {
   });
   if (!map)
     return (
-      <main className="spread-loading">
+      <main className="nodestar-loading">
         <Network size={35} />
         <span>Opening your space…</span>
       </main>
@@ -831,11 +1082,11 @@ export default function SpreadEditor() {
   const deleteReason = deletionError(map, selected);
   return (
     <Toaster>
-      <main className={`spread-app ${detail ? 'with-details' : ''}`}>
+      <main className={`nodestar-app ${detail ? 'with-details' : ''}`}>
         <header className="app-header">
           <div className="brand">
-            <Network size={23} />
-            <span>spread</span>
+            <img src="/favicon.svg" alt="" width={26} height={26} />
+            <span>nodestar</span>
           </div>
           <span className="header-divider" />
           <DropdownMenu>
@@ -843,13 +1094,11 @@ export default function SpreadEditor() {
               {map.title}
               <ChevronDown size={15} />
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="spread-menu">
+            <DropdownMenuContent className="nodestar-menu">
               <DropdownMenuItem onClick={() => setAllMaps(true)}>
                 <Network /> All Maps
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={newMap}
-              >
+              <DropdownMenuItem onClick={newMap}>
                 <FilePlus2 /> New map
               </DropdownMenuItem>
               <DropdownMenuItem onClick={exportMap}>
@@ -859,15 +1108,30 @@ export default function SpreadEditor() {
                 <Upload /> Restore backup
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setTheme(theme === 'paper' ? 'mist' : theme === 'mist' ? 'night' : 'paper')}>
-                <Circle /> Canvas Theme · {theme === 'paper' ? 'Paper' : theme === 'mist' ? 'Mist' : 'Night'}
+              <DropdownMenuItem
+                onClick={() =>
+                  setTheme(
+                    theme === 'paper'
+                      ? 'mist'
+                      : theme === 'mist'
+                        ? 'night'
+                        : 'paper',
+                  )
+                }
+              >
+                <Circle /> Canvas Theme ·{' '}
+                {theme === 'paper'
+                  ? 'Paper'
+                  : theme === 'mist'
+                    ? 'Mist'
+                    : 'Night'}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setHelp(true)}>
                 <Keyboard /> Keyboard shortcuts
               </DropdownMenuItem>
               {installPrompt && (
                 <DropdownMenuItem onClick={() => void installPrompt.prompt()}>
-                  <Download /> Install SPREAD
+                  <Download /> Install Nodestar
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -913,7 +1177,7 @@ export default function SpreadEditor() {
             </button>
           </div>
         </header>
-        <SpreadCanvas
+        <NodestarCanvas
           map={draft || map}
           assets={assets}
           selected={selected}
@@ -923,14 +1187,14 @@ export default function SpreadEditor() {
           viewport={viewport}
           setViewport={setViewport}
           mode={mode}
+          layoutMode={layoutMode}
           theme={theme}
           connecting={connecting}
           editing={editing}
           onText={saveText}
           onDraft={(id, text) => {
             const base = draftRef.current || ws.current.current;
-            if (base && text.trim())
-              ws.saveDraft(patchObject(base, id, { text }));
+            if (base) ws.saveDraft(patchObject(base, id, { text }));
           }}
           onSelect={select}
           onEdge={(id) => {
@@ -940,6 +1204,10 @@ export default function SpreadEditor() {
           }}
           onCommit={commit}
           onBranch={addBranch}
+          onConvert={convert}
+          linkedTitles={linkedTitles}
+          onOpenGraph={setOpenGraph}
+          onFold={fold}
           onEdit={setEditing}
           onCreate={(p) => beginNew('NODE', 'NORMAL', p)}
           onOpen={setDetail}
@@ -1105,13 +1373,26 @@ export default function SpreadEditor() {
                         </PopoverContent>
                       </Popover>
                       <button
+                        disabled={one.seeds.length < 2}
+                        onClick={() => commit((m) => shuffleSeeds(m, one.id))}
+                      >
+                        <Shuffle size={16} /> Shuffle
+                      </button>
+                    </>
+                  ) : one.type === 'GRAPH' ? (
+                    <>
+                      <button onClick={() => setOpenGraph(one.id)}>
+                        <Network size={16} /> Open graph
+                      </button>
+                      <button
                         onClick={() =>
-                          patch(one.id, {
-                            shuffle: nextVisualShuffle(one.shuffle),
+                          setGraphPicker({
+                            mode: 'convert',
+                            id: one.id,
                           })
                         }
                       >
-                        <Shuffle size={16} /> Shuffle
+                        <Link2 size={16} /> Link another
                       </button>
                     </>
                   ) : (
@@ -1131,7 +1412,7 @@ export default function SpreadEditor() {
                     >
                       <MoreHorizontal size={20} />
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="spread-menu" align="end">
+                    <DropdownMenuContent className="nodestar-menu" align="end">
                       <DropdownMenuItem
                         onClick={() => {
                           setConnecting(one.id);
@@ -1148,7 +1429,7 @@ export default function SpreadEditor() {
                       </DropdownMenuItem>
                       {one.type === 'NODE' && (
                         <DropdownMenuItem
-                          onClick={() => select(reachable(map, one.id), true)}
+                          onClick={() => select(downstream(map, one.id), true)}
                         >
                           <Network /> Select branch
                         </DropdownMenuItem>
@@ -1181,7 +1462,7 @@ export default function SpreadEditor() {
                   </span>
                   <button
                     onClick={() =>
-                      fit(map.objects.filter((o) => selected.has(o.id)))
+                      fit(onScreen.filter((o) => selected.has(o.id)))
                     }
                   >
                     <Scan size={16} /> Fit selection
@@ -1218,34 +1499,112 @@ export default function SpreadEditor() {
               <Hand size={19} />
             </button>
             <i />
+            <button
+              className={layoutMode === 'graph' ? 'active' : ''}
+              aria-label="Graph mode"
+              aria-pressed={layoutMode === 'graph'}
+              title="Graph mode · Cards snap onto ranked columns · G"
+              onClick={() => setLayoutMode('graph')}
+            >
+              <Workflow size={19} />
+            </button>
+            <button
+              className={layoutMode === 'canvas' ? 'active' : ''}
+              aria-label="Canvas mode"
+              aria-pressed={layoutMode === 'canvas'}
+              title="Canvas mode · Place cards freely · G"
+              onClick={() => setLayoutMode('canvas')}
+            >
+              <LayoutGrid size={19} />
+            </button>
+            {layoutMode === 'graph' && (
+              <button
+                aria-label="Sort graph now"
+                title="Sort graph now · Shift+G"
+                onClick={() => {
+                  if (!sortNow()) notify('The graph is already sorted.');
+                }}
+              >
+                <Wand2 size={19} />
+              </button>
+            )}
+            <i />
+            <fieldset className="direction-toggle">
+              <legend className="sr-only">
+                Default arrow direction for new paths
+              </legend>
+              <span className="direction-label" aria-hidden="true">
+                Arrows
+              </span>
+              {(
+                [
+                  ['outward', 'Away from goal', 'Goal → branch'],
+                  ['inward', 'Toward goal', 'Branch → goal'],
+                ] as const
+              ).map(([direction, label, shape]) => (
+                <button
+                  key={direction}
+                  className={pathDirection(map) === direction ? 'active' : ''}
+                  aria-pressed={pathDirection(map) === direction}
+                  aria-label={`New arrows: ${label}`}
+                  title={`New arrows · ${label} (${shape}). Paths already drawn keep their direction.`}
+                  // On a narrow screen only the chosen side shows, so
+                  // tapping it switches to the other one.
+                  onClick={() =>
+                    setPathDirection(
+                      pathDirection(map) !== direction
+                        ? direction
+                        : direction === 'outward'
+                          ? 'inward'
+                          : 'outward',
+                    )
+                  }
+                >
+                  {direction === 'outward' ? (
+                    <>
+                      <Target size={16} />
+                      <ArrowRight size={14} />
+                      <Circle size={11} className="direction-leaf" />
+                    </>
+                  ) : (
+                    <>
+                      <Circle size={11} className="direction-leaf" />
+                      <ArrowRight size={14} />
+                      <Target size={16} />
+                    </>
+                  )}
+                </button>
+              ))}
+            </fieldset>
+            <i />
             <DropdownMenu>
               <DropdownMenuTrigger className="create-button">
                 <Plus size={18} /> Create <ChevronDown size={14} />
               </DropdownMenuTrigger>
               <DropdownMenuContent
-                className="spread-menu"
+                className="nodestar-menu"
                 side="top"
                 sideOffset={12}
               >
-                {(['NODE', 'GOAL', 'SEED_BOX', 'IMAGINATION'] as const).map(
-                  (t) => {
-                    const Icon = icons[t];
-                    return (
-                      <DropdownMenuItem
-                        key={t}
-                        onClick={() =>
-                          beginNew(
-                            t === 'GOAL' ? 'NODE' : t,
-                            t === 'GOAL' ? 'GOAL' : 'NORMAL',
-                          )
-                        }
-                      >
-                        <Icon />
-                        {labels[t]}
-                      </DropdownMenuItem>
-                    );
-                  },
-                )}
+                {(
+                  ['NODE', 'GOAL', 'SEED_BOX', 'IMAGINATION', 'GRAPH'] as const
+                ).map((t) => {
+                  const Icon = icons[t];
+                  return (
+                    <DropdownMenuItem
+                      key={t}
+                      onClick={() =>
+                        beginNew(
+                          t === 'GOAL' ? 'NODE' : t,
+                          t === 'GOAL' ? 'GOAL' : 'NORMAL',
+                        )
+                      }
+                    >
+                      <Icon />
+                      {labels[t]}
+                    </DropdownMenuItem>
+                  );
+                })}
               </DropdownMenuContent>
             </DropdownMenu>
             <i />
@@ -1259,7 +1618,7 @@ export default function SpreadEditor() {
             <button
               title="Fit graph · Ctrl+0"
               aria-label="Fit graph"
-              onClick={() => fit(map.objects)}
+              onClick={() => fit(onScreen)}
             >
               <Scan size={19} />
             </button>
@@ -1269,7 +1628,10 @@ export default function SpreadEditor() {
               <b /> Path <i /> Related <em /> Reference
             </span>
             <span>
-              {map.objects.length} objects · Double-click to plant an idea
+              {onScreen.length} objects
+              {onScreen.length < map.objects.length &&
+                ` · ${map.objects.length - onScreen.length} folded`}{' '}
+              · Double-click to plant an idea
             </span>
           </div>
           <div className="zoom-tools" data-ui>
@@ -1287,16 +1649,19 @@ export default function SpreadEditor() {
               <Plus size={15} />
             </button>
           </div>
-        </SpreadCanvas>
+        </NodestarCanvas>
         <Dialog open={allMaps} onOpenChange={setAllMaps}>
           <DialogContent className="all-maps-dialog">
             <DialogTitle>All Maps</DialogTitle>
             <DialogDescription>
-              Create, switch, rename, duplicate, archive, or delete a map on this device.
+              Create, switch, duplicate, archive, or delete a map on this device. Rename a map from its title at the top once it is open.
             </DialogDescription>
             <div className="all-maps-list">
               {ws.maps.map((entry) => (
-                <div className={`map-row ${entry.id === ws.activeMapId ? 'active' : ''} ${entry.archived ? 'archived' : ''}`} key={entry.id}>
+                <div
+                  className={`map-row ${entry.id === ws.activeMapId ? 'active' : ''} ${entry.archived ? 'archived' : ''}`}
+                  key={entry.id}
+                >
                   <button
                     className="map-row-open"
                     disabled={entry.archived}
@@ -1307,26 +1672,51 @@ export default function SpreadEditor() {
                       setAllMaps(false);
                     }}
                   >
-                    <MapPreview map={entry.map} />
                     <strong>{entry.title}</strong>
-                    <small>{entry.map.objects.length} objects · {entry.archived ? 'Archived' : entry.id === ws.activeMapId ? 'Open now' : `Edited ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(entry.updatedAt)}`}</small>
+                    <small>
+                      {entry.map.objects.length} objects ·{' '}
+                      {entry.archived
+                        ? 'Archived'
+                        : entry.id === ws.activeMapId
+                          ? 'Open now'
+                          : `Edited ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(entry.updatedAt)}`}
+                    </small>
                   </button>
-                  <input
-                    aria-label={`Rename ${entry.title}`}
-                    defaultValue={entry.title}
-                    key={`${entry.id}-${entry.title}`}
-                    onBlur={(e) => ws.renameMap(entry.id, e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                  />
-                  <button title="Duplicate map" aria-label={`Duplicate ${entry.title}`} onClick={() => duplicateMap(entry.id)}><Copy size={15} /></button>
-                  <button title={entry.archived ? 'Restore map' : 'Archive map'} aria-label={`${entry.archived ? 'Restore' : 'Archive'} ${entry.title}`} onClick={() => ws.archiveMap(entry.id, !entry.archived)}><ArrowLeftRight size={15} /></button>
-                  <button title="Delete map" aria-label={`Delete ${entry.title}`} disabled={ws.maps.length === 1} onClick={() => {
-                    if (window.confirm(`Delete “${entry.title}”? This cannot be undone.`)) ws.deleteMap(entry.id);
-                  }}><Trash2 size={15} /></button>
+                  <button
+                    title="Duplicate map"
+                    aria-label={`Duplicate ${entry.title}`}
+                    onClick={() => duplicateMap(entry.id)}
+                  >
+                    <Copy size={15} />
+                  </button>
+                  <button
+                    title={entry.archived ? 'Restore map' : 'Archive map'}
+                    aria-label={`${entry.archived ? 'Restore' : 'Archive'} ${entry.title}`}
+                    onClick={() => ws.archiveMap(entry.id, !entry.archived)}
+                  >
+                    <ArrowLeftRight size={15} />
+                  </button>
+                  <button
+                    title="Delete map"
+                    aria-label={`Delete ${entry.title}`}
+                    disabled={ws.maps.length === 1}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Delete “${entry.title}”? This cannot be undone.`,
+                        )
+                      )
+                        ws.deleteMap(entry.id);
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               ))}
             </div>
-            <button className="primary-button" onClick={newMap}><FilePlus2 size={16} /> New map</button>
+            <button className="primary-button" onClick={newMap}>
+              <FilePlus2 size={16} /> New map
+            </button>
           </DialogContent>
         </Dialog>
         <ObjectDetails
@@ -1363,6 +1753,9 @@ export default function SpreadEditor() {
                       key={o.id}
                       value={`${o.id} ${o.text} ${o.type === 'IMAGINATION' ? o.note : ''} ${o.seeds.map((s) => s.text).join(' ')}`}
                       onSelect={() => {
+                        // Searching for something folded away brings it back
+                        // rather than framing an empty stretch of canvas.
+                        reveal(o.id);
                         setSelected(new Set([o.id]));
                         setExplicit(false);
                         setEdge('');
@@ -1429,6 +1822,108 @@ export default function SpreadEditor() {
             </form>
           </DialogContent>
         </Dialog>
+        <Dialog
+          open={!!graphPicker}
+          onOpenChange={(open) => {
+            if (!open) {
+              setGraphPicker(null);
+              setNewGraphTitle('');
+            }
+          }}
+        >
+          <DialogContent className="graph-link-dialog">
+            <DialogTitle>Which graph does this open?</DialogTitle>
+            <DialogDescription>
+              A Graph object shows another map&rsquo;s central goal. Open it to
+              move across.
+            </DialogDescription>
+            <div className="graph-link-list">
+              {ws.maps
+                .filter(
+                  (entry) => !entry.archived && entry.id !== ws.activeMapId,
+                )
+                .map((entry) => (
+                  <button
+                    key={entry.id}
+                    className="graph-link-row"
+                    onClick={() => linkGraph(entry.id)}
+                  >
+                    <Network size={16} />
+                    <span className="graph-link-goal">
+                      {centralGoalText(entry)}
+                    </span>
+                    <span className="graph-link-title">{entry.title}</span>
+                  </button>
+                ))}
+              {ws.maps.filter(
+                (entry) => !entry.archived && entry.id !== ws.activeMapId,
+              ).length === 0 && (
+                <p className="muted">
+                  No other graph yet. Name one below and it is created with that
+                  central goal.
+                </p>
+              )}
+            </div>
+            <form
+              className="graph-link-new"
+              onSubmit={(e) => {
+                e.preventDefault();
+                linkNewGraph();
+              }}
+            >
+              <input
+                autoFocus
+                value={newGraphTitle}
+                placeholder="Or start a new graph…"
+                aria-label="New graph goal"
+                onChange={(e) => setNewGraphTitle(e.target.value)}
+              />
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={!newGraphTitle.trim()}
+              >
+                <FilePlus2 size={16} /> Create graph
+              </button>
+            </form>
+          </DialogContent>
+        </Dialog>
+        <AlertDialog
+          open={!!openGraph}
+          onOpenChange={(open) => {
+            if (!open) setOpenGraph('');
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogTitle>
+              Move to{' '}
+              {linkedTitles[
+                map.objects.find((o) => o.id === openGraph)?.mapRef || ''
+              ] || 'this graph'}
+              ?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This map stays where it is. You can come back from All Maps.
+            </AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Stay here</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  const target = map.objects.find((o) => o.id === openGraph);
+                  setOpenGraph('');
+                  if (!target?.mapRef) return;
+                  if (!ws.maps.some((entry) => entry.id === target.mapRef)) {
+                    notify('That graph is no longer in this workspace.');
+                    return;
+                  }
+                  ws.selectMap(target.mapRef);
+                }}
+              >
+                Open graph
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <AlertDialog
           open={!!confirmDelete}
           onOpenChange={(open) => {
@@ -1478,7 +1973,7 @@ export default function SpreadEditor() {
         </Dialog>
         <Dialog open={help} onOpenChange={setHelp}>
           <DialogContent className="help-dialog">
-            <DialogTitle>A few ways to spread</DialogTitle>
+            <DialogTitle>A few ways to navigate</DialogTitle>
             <DialogDescription>
               Direct actions, a little room to explore.
             </DialogDescription>
@@ -1486,6 +1981,9 @@ export default function SpreadEditor() {
               {[
                 ['Create an independent node', 'Double-click canvas'],
                 ['Add the next node / contributor', 'Select node, then +'],
+                ['Choose what the + adds', 'Right-click the +'],
+                ['Change what an object is', 'Right-click it → Change kind'],
+                ['Fold a whole branch away', 'The control on the card edge'],
                 ['Edit text', 'Enter / double-click'],
                 ['Select several objects', 'Ctrl + click / drag canvas'],
                 ['Move view', 'Right mouse drag / Space + drag / middle mouse'],
@@ -1494,6 +1992,8 @@ export default function SpreadEditor() {
                 ['Focus on a node', 'F'],
                 ['Search', 'Ctrl + F'],
                 ['Fit graph', 'Ctrl + 0'],
+                ['Graph mode / canvas mode', 'G'],
+                ['Sort the graph now', 'Shift + G'],
                 ['Move selection precisely', 'Arrow keys / Shift + arrows'],
                 ['Copy / paste / duplicate', 'Ctrl + C / V / D'],
                 ['Undo / redo', 'Ctrl + Z / Shift + Z'],

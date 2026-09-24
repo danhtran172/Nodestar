@@ -21,6 +21,11 @@
   --radius-lg: 12px;
 }
 :root {
+  /* Node handles: add the next node, draw a path. */
+  --handle-add: #d6df8b;
+  --handle-connect: #38aee8;
+  --handle-ink: #1b2330;
+  --handle-faded: 0.35;
   --background: #f6f8fb;
   --foreground: #253046;
   --primary: #4568b9;
@@ -60,7 +65,7 @@ textarea:focus-visible {
   outline: 3px solid #91adea;
   outline-offset: 3px;
 }
-.spread-app {
+.nodestar-app {
   height: 100dvh;
   overflow: hidden;
 }
@@ -80,6 +85,11 @@ textarea:focus-visible {
   gap: 10px;
   align-items: center;
   color: #3157a7;
+}
+.brand img {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
 }
 .brand span {
   font-size: 28px;
@@ -127,7 +137,9 @@ textarea:focus-visible {
   background-color: #1c2431;
   background-image: radial-gradient(#516174 0.7px, transparent 0.7px);
 }
-.canvas-theme-night .edge { stroke: #8397b3; }
+.canvas-theme-night .edge {
+  stroke: #8397b3;
+}
 .canvas-heading {
   position: absolute;
   left: 34px;
@@ -207,7 +219,14 @@ textarea:focus-visible {
 .canvas-object.seed_box,
 .canvas-object.imagination {
   padding: 0;
+  overflow: visible;
+}
+.object-surface {
+  position: relative;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
+  border-radius: inherit;
 }
 .seed_box .object-label,
 .imagination .object-label,
@@ -249,9 +268,95 @@ textarea:focus-visible {
   gap: 8px;
   color: #5c6f88;
 }
-.object-title .object-text { min-width: 0; font-size: 16px; }
-.seed_box .object-title { color: #766341; }
-.imagination .object-title { color: #726b88; }
+.object-title .object-text {
+  min-width: 0;
+  font-size: 16px;
+}
+.seed_box .object-title {
+  color: #766341;
+}
+.imagination .object-title {
+  color: #726b88;
+}
+.object-kind-badge {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: #fffffff2;
+  box-shadow: 0 3px 10px #283f5d12;
+  color: #766341;
+  font-size: 12px;
+  font-weight: 650;
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 130ms ease,
+    transform 160ms ease;
+}
+.object-kind-badge.imagination {
+  color: #726b88;
+}
+.canvas-object:hover .object-kind-badge,
+.canvas-object.selected .object-kind-badge,
+.object-kind-badge.editing {
+  opacity: 1;
+  transform: translateY(0);
+}
+.object-kind-name {
+  white-space: nowrap;
+  line-height: 14px;
+}
+.object-title-below {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 6;
+  max-width: 100%;
+  overflow: hidden;
+  color: #766341;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  transition:
+    opacity 130ms ease,
+    transform 160ms ease;
+}
+.object-title-below.imagination {
+  color: #726b88;
+}
+.object-title-below.hover-only {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.canvas-object:hover .object-title-below.hover-only,
+.object-title-below.editing {
+  opacity: 1;
+  transform: translateY(0);
+}
+.object-title-below .inline-editor {
+  width: min(250px, 100%);
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: #fffffff2;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: auto;
+}
 .canvas-object.goal {
   background: #edf3ff;
   border-color: #b9c9e9;
@@ -279,25 +384,93 @@ textarea:focus-visible {
   font-size: 11px;
   letter-spacing: 0;
 }
-.branch-plus {
+/* The control sits where this card's paths leave it, facing the way the branch
+   fans out. Folded, it carries the count of what it is holding back, which is
+   both the affordance and the reason to press it again. */
+.fold-toggle {
   position: absolute;
-  right: -14px;
-  top: calc(50% - 14px);
-  width: 28px;
-  height: 28px;
+  top: calc(50% - 11px);
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: white;
   border: 1px solid #b8c9e7;
+  background: white;
   color: #4568b9;
+  box-shadow: 0 1px 3px #283f5d1a;
+  z-index: 4;
+}
+.fold-toggle.right {
+  right: -11px;
+}
+.fold-toggle.left {
+  left: -11px;
+}
+.fold-toggle.left svg {
+  transform: rotate(180deg);
+}
+.fold-toggle:hover {
+  background: #edf3ff;
+  border-color: #8aa6db;
+}
+.fold-toggle.folded {
+  border-color: #4568b9;
+  background: #4568b9;
+  color: white;
+}
+.fold-count {
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+/* Unlike the add handle, this one stays put when zoomed out: thinning a large
+   map is the reason to be at that zoom in the first place. */
+/* Node handles: green adds the next node just past the right edge, blue at
+   the centre draws a path. Both stay hidden until the card is hovered or
+   selected, sit faded while the pointer is elsewhere on the card, and come
+   up fully once the pointer is close to them (`data-near`, set on move). */
+.branch-plus {
+  position: absolute;
+  left: calc(100% + 16px);
+  top: calc(50% - 16px);
+  z-index: 3;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--handle-add);
+  border: 0;
+  color: var(--handle-ink);
+  box-shadow: 0 1px 4px #2b40621f;
   opacity: 0;
-  transition: opacity 0.15s;
+  pointer-events: none;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+/* Bridges the gap to the card, so travelling to the handle keeps it lit. */
+.branch-plus::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  left: -22px;
+  right: -6px;
+  border-radius: 999px;
 }
 .canvas-object:hover .branch-plus,
-.selected .branch-plus,
+.selected .branch-plus {
+  opacity: var(--handle-faded);
+  pointer-events: auto;
+}
+.canvas-object[data-near='add'] .branch-plus,
+.branch-plus:hover,
 .branch-plus:focus-visible {
   opacity: 1;
+  pointer-events: auto;
+  transform: scale(1.06);
 }
 .seed_box {
   background: #f8f5ec;
@@ -306,24 +479,35 @@ textarea:focus-visible {
 .seed_box .object-label {
   color: #93815c;
 }
-.seed-bed {
-  padding-top: 25px;
-  display: flex;
-  gap: 15px 10px;
-  flex-wrap: wrap;
-  align-content: flex-end;
-}
+/* Seeds read as chips: a flat pill sized by its own text, laid out by
+   `seedLayout` so the measurements here and there stay in step. */
 .seed {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   max-width: 100%;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: #fffdf5;
-  border: 1px solid #e2d8b5;
-  border-radius: 6px;
+  border: 1px solid #e4dabb;
+  border-radius: 999px;
   color: #766341;
   font-size: 13px;
-  box-shadow: 0 3px 5px #7f703414;
+  line-height: 18px;
+}
+.seed.multiline {
+  border-radius: 11px;
+  overflow: hidden;
+}
+.seed-text {
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+/* `seedLayout` measures a chip from its character count, which is close but
+   never exact. Holding a one-line chip to one line keeps a couple of stray
+   pixels from wrapping text the layout already made room for. */
+.seed:not(.multiline) .seed-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .imagination {
   background: #f8f8fb;
@@ -383,17 +567,49 @@ textarea:focus-visible {
   background: var(--line);
   margin: 0 5px;
 }
+.direction-toggle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 2px;
+  border: 0;
+  min-width: 0;
+  border-radius: 10px;
+  background: #f4f6fa;
+}
+.direction-label {
+  padding: 0 4px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7789;
+}
+.direction-toggle button {
+  height: 34px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 8px;
+  color: #8892a3;
+}
+.direction-toggle button.active {
+  background: white;
+  color: var(--blue);
+  box-shadow: 0 1px 3px #2b406222;
+}
 .main-tools .create-button {
   padding: 0 12px;
   display: flex;
   gap: 9px;
 }
-.spread-menu {
+.nodestar-menu {
   width: 205px;
   padding: 7px;
   background: white;
 }
-.spread-menu [data-slot='dropdown-menu-item'] {
+.nodestar-menu [data-slot='dropdown-menu-item'] {
   padding: 10px;
   gap: 10px;
   cursor: pointer;
@@ -475,6 +691,27 @@ textarea:focus-visible {
     bottom: 38px;
     max-width: calc(100% - 24px);
   }
+  .direction-label,
+  .direction-leaf,
+  .direction-toggle button:not(.active) {
+    display: none;
+  }
+  .main-tools {
+    gap: 2px;
+    padding: 5px;
+  }
+  .main-tools > button {
+    min-width: 32px;
+  }
+  .main-tools i {
+    margin: 0 1px;
+  }
+  .direction-toggle {
+    padding: 0;
+  }
+  .direction-toggle button {
+    padding: 0 5px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -485,7 +722,7 @@ textarea:focus-visible {
   }
 }
 
-.spread-loading {
+.nodestar-loading {
   height: 100dvh;
   display: flex;
   align-items: center;
@@ -556,6 +793,18 @@ textarea:focus-visible {
   z-index: 4;
   cursor: grabbing;
 }
+/* A card resting on another one during a drag. It keeps following the pointer,
+   but the position cannot be kept, so it reads as lifted rather than placed:
+   filter, not opacity, because the highlight dimming owns the inline opacity. */
+.canvas-object.floating {
+  filter: opacity(0.5) saturate(0.85);
+  border-style: dashed;
+  box-shadow: 0 22px 40px #283f5d1f;
+  z-index: 5;
+  transition:
+    filter 0.14s,
+    box-shadow 0.14s;
+}
 .canvas-object.drop-target {
   border-color: #498873;
   box-shadow: 0 0 0 5px #49887318;
@@ -569,6 +818,56 @@ textarea:focus-visible {
   border: 1px solid #6c8ecb;
   background: #4568b916;
   pointer-events: none;
+}
+/* Where a dragged card lands once graph mode re-flows the columns, and how it
+   will be connected once it is there. */
+.snap-frame {
+  position: absolute;
+  border-radius: 14px;
+  background: #ccd3dee0;
+  pointer-events: none;
+  transition:
+    left 90ms ease-out,
+    top 90ms ease-out,
+    width 90ms ease-out,
+    height 90ms ease-out;
+}
+/* The rank a sibling drop would be inserted on. It sits above the dragged card
+   because the pointer, and so the card, is right on top of that rank. */
+.insertion-bar {
+  position: absolute;
+  height: 3px;
+  border-radius: 2px;
+  background: #4568b9;
+  pointer-events: none;
+  z-index: 6;
+}
+.insertion-bar::before,
+.insertion-bar::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #4568b9;
+}
+.insertion-bar::before {
+  left: -5px;
+}
+.insertion-bar::after {
+  right: -5px;
+}
+.snap-edge {
+  fill: none;
+  stroke: #ccd3de;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+@media (prefers-reduced-motion: reduce) {
+  .snap-frame {
+    transition: none;
+  }
 }
 .drag-message {
   position: absolute;
@@ -599,18 +898,96 @@ textarea:focus-visible {
   flex: 1;
   min-width: 0;
 }
+/* A Graph object stands for another map, so it reads as a doorway: goal weight
+   for the goal it borrows, and a row naming what opening it does. */
+.canvas-object.graph {
+  border-color: #c3cfe6;
+  background: linear-gradient(#ffffff, #f7f9ff);
+  cursor: pointer;
+}
+.canvas-object.graph .node-content {
+  display: block;
+}
+.canvas-object.graph .object-text {
+  font-size: 19px;
+  line-height: 1.32;
+}
+.graph-open-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #6881aa;
+}
+.graph-link-dialog {
+  width: min(520px, calc(100vw - 32px));
+}
+.graph-link-list {
+  display: grid;
+  gap: 6px;
+  max-height: min(42vh, 320px);
+  overflow: auto;
+  margin: 4px 0 14px;
+}
+.graph-link-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  text-align: left;
+}
+.graph-link-row:hover {
+  border-color: #b8c9e7;
+  background: #f4f8ff;
+}
+.graph-link-goal {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-link-title {
+  color: var(--muted);
+  font-size: 12px;
+}
+.graph-link-new {
+  display: flex;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.graph-link-new input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
 .node-thumbnail {
+  display: block;
+  flex-shrink: 0;
   width: 64px;
   height: 64px;
-  object-fit: cover;
+  overflow: hidden;
   border-radius: 7px;
   margin: -10px 0 -10px -10px;
+  background: #eef1f6;
+}
+.node-thumbnail img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .hero-image {
   height: 150px;
   margin: -25px -25px 16px;
   overflow: hidden;
   border-radius: 13px 13px 0 0;
+  background: #eef1f6;
 }
 .hero-image img {
   width: 100%;
@@ -638,36 +1015,32 @@ textarea:focus-visible {
 }
 .resize-grip {
   position: absolute;
-  right: 11px;
-  bottom: 9px;
-  width: 46px;
-  height: 14px;
-  border-bottom: 2px solid #9aa9bf;
-  border-radius: 0 0 50% 50%;
+  right: -10px;
+  bottom: -10px;
+  z-index: 6;
+  width: 24px;
+  height: 24px;
   cursor: nwse-resize;
   touch-action: none;
-  opacity: 0.7;
+  /* The grip is one 1px stroke in the selected card's border color. */
+  color: var(--blue);
+  opacity: 1;
 }
-.resize-grip::after {
-  content: '';
-  position: absolute;
-  right: -2px;
-  bottom: -4px;
-  width: 7px;
-  height: 7px;
-  border: 2px solid #9aa9bf;
-  border-radius: 50%;
-  background: white;
+.resize-grip svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
 }
-.seed-bed {
-  align-content: flex-end;
-  gap: 20px 12px;
-  padding: 30px 0 8px;
+.resize-grip path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-linecap: round;
 }
 .seed {
   cursor: grab;
-  font-size: 14px;
-  line-height: 1.35;
   animation: seed-fall 0.45s cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
 .seed:active {
@@ -675,35 +1048,36 @@ textarea:focus-visible {
 }
 .seed-convert {
   display: inline-grid;
-  width: 18px;
-  height: 18px;
-  margin-left: 7px;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
   place-items: center;
   border: 1px solid #cbbf95;
   border-radius: 50%;
   color: #7b6840;
   vertical-align: middle;
   cursor: alias;
-  opacity: .65;
+  opacity: 0.65;
 }
 .seed:hover .seed-convert,
-.seed-convert:focus-visible { opacity: 1; background: #fff8dc; }
+.seed-convert:focus-visible {
+  opacity: 1;
+  background: #fff8dc;
+}
 .box-add {
   position: absolute;
-  top: 15px;
-  right: 15px;
-  width: 26px;
-  height: 26px;
+  bottom: 7px;
+  right: 7px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: #ffffff85;
   display: grid;
   place-items: center;
 }
 .seed_box .object-label {
-  padding-right: 46px;
-}
-.seed_box .seed-bed {
-  margin: 0 20px;
+  padding-right: 36px;
 }
 .image-empty {
   width: calc(100% - 40px);
@@ -734,16 +1108,92 @@ textarea:focus-visible {
 }
 .imagination .image-grid {
   margin: 0;
-  height: calc(100% - 52px);
+  width: 100%;
+  height: 100%;
   border-radius: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  align-content: stretch;
 }
-.imagination .image-grid.count-2.portrait-led { grid-template-columns: 1fr; grid-template-rows: repeat(2, minmax(0, 1fr)); }
-.imagination .image-grid.count-2.landscape-led { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.imagination .image-grid.count-4.portrait-led .image-slot:first-child { grid-row: span 2; }
-.imagination .image-grid.count-4.landscape-led .image-slot:first-child { grid-column: span 2; }
+.imagination .object-surface {
+  container-type: inline-size;
+}
+.imagination .image-grid.imagination-layout-uniform {
+  gap: 2.6316cqw;
+}
+.imagination .image-grid.imagination-layout-uniform.count-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+.imagination .image-grid.imagination-layout-uniform.count-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: 1fr;
+}
+.imagination .image-grid.imagination-layout-uniform.count-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: 1fr;
+}
+.imagination .image-grid.imagination-layout-uniform.count-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+.imagination .image-grid.imagination-layout-uniform.count-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: 1fr;
+}
+.imagination .image-grid.imagination-layout-uniform.count-6 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+.imagination .image-grid.imagination-layout-uniform .image-slot:first-child {
+  grid-column: auto;
+  grid-row: auto;
+}
+.imagination
+  .image-grid.imagination-layout-uniform.count-4
+  .image-slot:nth-child(2),
+.imagination
+  .image-grid.imagination-layout-uniform.count-4
+  .image-slot:nth-child(3),
+.imagination
+  .image-grid.imagination-layout-uniform.count-4
+  .image-slot:nth-child(4) {
+  grid-column: auto;
+  grid-row: auto;
+}
+.imagination .image-grid.count-1 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+.imagination .image-grid.count-2,
+.imagination .image-grid.count-3 {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+.imagination .image-grid.count-4 .image-slot:nth-child(2) {
+  grid-column: 3;
+  grid-row: 2;
+}
+.imagination .image-grid.count-4 .image-slot:nth-child(3) {
+  grid-column: 2;
+  grid-row: 3;
+}
+.imagination .image-grid.count-4 .image-slot:nth-child(4) {
+  grid-column: 3;
+  grid-row: 3;
+}
+.imagination .image-grid .image-slot {
+  grid-column: auto;
+  grid-row: auto;
+  aspect-ratio: auto;
+}
+.imagination .image-grid .image-slot:first-child {
+  grid-column: span 2;
+  grid-row: span 2;
+}
 .imagination .image-empty {
   width: 100%;
-  height: calc(100% - 52px);
+  height: 100%;
   margin: 0;
   border: 0;
   border-top: 1px dashed #cfd2df;
@@ -752,6 +1202,7 @@ textarea:focus-visible {
 .image-slot {
   overflow: hidden;
   position: relative;
+  background: #eef1f6;
 }
 .image-slot img {
   width: 100%;
@@ -793,7 +1244,8 @@ textarea:focus-visible {
   align-items: center;
   gap: 10px;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--color-destructive) 35%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--color-destructive) 35%, transparent);
   border-radius: 14px;
   background: var(--color-popover);
   box-shadow: 0 12px 32px rgb(41 33 24 / 14%);
@@ -849,22 +1301,185 @@ textarea:focus-visible {
 .far-zoom .branch-plus {
   display: none;
 }
-.connect-dot {
+.relation-dot {
   position: absolute;
-  right: -17px;
-  bottom: 13px;
+  left: calc(50% - 16px);
+  top: calc(50% - 16px);
+  z-index: 4;
+  width: 32px;
+  height: 32px;
   display: grid;
-  width: 26px;
-  height: 26px;
   place-items: center;
-  border: 1px solid #b8c9e7;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
-  color: #4568b9;
-  background: white;
-  transition: opacity .15s;
+  background: var(--handle-connect);
+  color: var(--handle-ink);
+  box-shadow: 0 1px 4px #2b40621f;
+  cursor: crosshair;
+  touch-action: none;
+  /* Hidden until the pointer comes close to the centre, faded while it is
+     close, and fully up only with the pointer right on the handle. */
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
 }
-.connect-dot.left { left: -17px; right: auto; }
-.connect-dot:focus-visible { outline: 2px solid #4568b9; outline-offset: 2px; }
+.relation-dot svg {
+  pointer-events: none;
+}
+.canvas-object[data-near='connect'] .relation-dot {
+  opacity: var(--handle-faded);
+  pointer-events: auto;
+}
+/* A selected node keeps its handle pressable even out of sight: a finger or
+   pen never hovers, so it can never be "close" first. */
+.canvas-object.selected .relation-dot {
+  pointer-events: auto;
+}
+.canvas-object .relation-dot:hover,
+.canvas-object .relation-dot:focus-visible,
+.canvas-object .relation-dot:active {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1.06);
+}
+/* Without a hovering pointer there is no "close", so a selected node shows
+   its handle faded for a finger or pen to find. */
+@media (hover: none) {
+  .canvas-object.selected .relation-dot {
+    opacity: var(--handle-faded);
+  }
+}
+/* The handle sits on the text, so the text steps back while it is in use. */
+.canvas-object[data-near='connect']
+  > :not(.relation-dot, .branch-plus, .fold-toggle, .resize-grip) {
+  opacity: 0.35;
+  transition: opacity 0.15s;
+}
+.far-zoom .relation-dot {
+  display: none;
+}
+.canvas-object[data-relation-target='valid'] {
+  border-color: #338264;
+  box-shadow: 0 0 0 3px #33826428;
+}
+.canvas-object[data-relation-target='invalid'] {
+  border-color: #bb4d59;
+  box-shadow: 0 0 0 3px #bb4d5928;
+}
+.canvas-object[data-relation-candidate='center'] > :not(.relation-target-dot) {
+  opacity: 0.22;
+  filter: blur(1.5px);
+  transform: scale(0.98);
+}
+.canvas-object[data-relation-candidate='center'] {
+  border-color: #7897d1;
+  box-shadow: 0 0 0 4px #4568b91c;
+}
+.canvas-object[data-relation-success='true'] {
+  animation: relation-connect-success 560ms ease-out both;
+}
+.relation-target-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 5;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  border: 2px solid #315da9;
+  border-radius: 50%;
+  background: #315da9;
+  box-shadow:
+    0 0 0 5px #4568b92e,
+    0 4px 12px #315da940;
+  animation: relation-target-appear 180ms ease-out both;
+}
+.relation-target-dot::after {
+  position: absolute;
+  inset: 11px;
+  content: '';
+  border-radius: 50%;
+  background: white;
+}
+.relation-target-dot.valid {
+  border-color: #267858;
+  background: #267858;
+  box-shadow:
+    0 0 0 5px #3382642e,
+    0 4px 12px #26785840;
+  animation: relation-target-ready 760ms ease-in-out infinite;
+}
+.relation-target-dot.valid::after {
+  background: white;
+}
+.relation-target-dot.invalid {
+  border-color: #bb4d59;
+  background: #bb4d59;
+  box-shadow:
+    0 0 0 5px #bb4d592e,
+    0 4px 12px #bb4d5940;
+}
+.relation-target-dot.invalid::after {
+  background: white;
+}
+.relation-preview {
+  stroke-dasharray: 5 4;
+}
+.relation-preview-layer {
+  z-index: 4;
+}
+.relation-preview.valid {
+  stroke: #338264;
+  stroke-dasharray: none;
+}
+.relation-preview.invalid {
+  stroke: #bb4d59;
+}
+@keyframes relation-target-appear {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.45);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes relation-target-ready {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.14);
+  }
+}
+@keyframes relation-connect-success {
+  0% {
+    border-color: #338264;
+    box-shadow: 0 0 0 0 #33826466;
+  }
+  55% {
+    border-color: #338264;
+    box-shadow: 0 0 0 12px #33826400;
+  }
+  100% {
+    box-shadow:
+      0 3px 5px #283f5d04,
+      0 12px 32px #283f5d05;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-object[data-relation-success='true'],
+  .relation-target-dot,
+  .relation-target-dot.valid {
+    animation: none;
+  }
+}
 .semantic-slot {
   position: absolute;
   width: 18px;
@@ -892,46 +1507,93 @@ textarea:focus-visible {
   text-align: left;
   font-size: 13px;
 }
-.object-context-menu button:hover { background: #edf3ff; }
-.display-note-toggle { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; }
-.display-note-toggle input { width: 15px; height: 15px; accent-color: var(--blue); }
-.all-maps-dialog { width: min(720px, calc(100vw - 32px)); }
-.all-maps-list { display: grid; gap: 8px; max-height: min(52vh, 480px); overflow: auto; }
+.object-context-menu button:hover:not(:disabled) {
+  background: #edf3ff;
+}
+.object-context-menu .context-heading {
+  margin-top: 4px;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.object-context-menu .context-heading:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 4px;
+}
+/* The kind the object already is: shown so the menu reads as a state, and
+   disabled because choosing it would do nothing. */
+.object-context-menu button.current-kind {
+  color: var(--blue);
+  background: #edf3ff;
+  cursor: default;
+}
+.display-note-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.display-note-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--blue);
+}
+.all-maps-dialog {
+  width: min(720px, calc(100vw - 32px));
+}
+.all-maps-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(52vh, 480px);
+  overflow: auto;
+}
 .map-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(130px, .55fr) repeat(3, 34px);
+  grid-template-columns: minmax(0, 1fr) repeat(3, 34px);
   gap: 6px;
   align-items: center;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 10px;
 }
-.map-row.active { border-color: #7894ce; background: #edf3ff; }
-.map-row.archived { opacity: .58; }
-.map-row-open { display: grid; grid-template-columns: 124px minmax(0, 1fr); min-width: 0; gap: 3px 8px; text-align: left; padding: 4px; }
-.map-row-open .map-preview { grid-row: span 2; }
-.map-row-open strong, .map-row-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.map-row-open small { color: var(--muted); font-size: 11px; }
-.map-row input { min-width: 0; padding: 6px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
-.map-row > button:not(.map-row-open) { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 7px; }
-.map-row > button:not(.map-row-open):hover { background: #f0f4fa; }
-.map-preview {
-  position: relative;
-  width: 124px;
-  height: 74px;
-  overflow: hidden;
-  border: 1px solid #dbe3ed;
-  border-radius: 6px;
-  background: radial-gradient(#c9d3e0 .6px, transparent .6px) 0 0 / 12px 12px, #f8fafc;
+.map-row.active {
+  border-color: #7894ce;
+  background: #edf3ff;
 }
-.map-preview i { position: absolute; display: block; border: 1px solid #aab8ca; border-radius: 2px; background: #fff; }
-.map-preview i.goal { background: #dfeafd; border-color: #8ca5d2; }
-.map-preview i.seed_box { background: #f4ead0; border-color: #d6bc76; }
-.map-preview i.imagination { background: #e9e6f1; border-color: #b4adc8; }
-.map-preview.empty { display: grid; place-items: center; color: var(--muted); font-size: 11px; }
-@media (max-width: 640px) {
-  .map-row { grid-template-columns: minmax(0, 1fr) repeat(3, 34px); }
-  .map-row input { grid-column: 1 / -1; grid-row: 2; }
+.map-row.archived {
+  opacity: 0.58;
+}
+.map-row-open {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  text-align: left;
+  padding: 4px 6px;
+}
+.map-row-open strong,
+.map-row-open small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-row-open small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.map-row > button:not(.map-row-open) {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+}
+.map-row > button:not(.map-row-open):hover {
+  background: #f0f4fa;
 }
 .context-tools {
   position: absolute;
@@ -1003,7 +1665,7 @@ textarea:focus-visible {
   gap: 0;
   background: white;
 }
-.spread-app ~ [data-slot='sheet-overlay'],
+.nodestar-app ~ [data-slot='sheet-overlay'],
 [data-slot='sheet-overlay'] {
   display: none;
 }
@@ -1110,16 +1772,54 @@ textarea:focus-visible {
   border-bottom: 1px solid #edf0f5;
 }
 .asset-preview {
-  width: 70px;
-  height: 70px;
+  width: 96px;
+  height: 96px;
   flex-shrink: 0;
   overflow: hidden;
   border-radius: 8px;
 }
-.asset-preview img {
+.asset-row.wide {
+  flex-wrap: wrap;
+}
+.asset-row.wide .asset-preview {
+  width: 100%;
+  height: 140px;
+}
+.crop-editor {
+  display: block;
+  position: relative;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: #eef1f6;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.crop-editor:active {
+  cursor: grabbing;
+}
+.crop-editor:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.crop-editor img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  pointer-events: none;
+}
+.crop-editor-zoom {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #172235a8;
+  color: white;
+  font-size: 11px;
+  pointer-events: none;
 }
 .asset-row > div {
   min-width: 0;
@@ -1148,17 +1848,6 @@ textarea:focus-visible {
 }
 .asset-list {
   margin-bottom: 20px;
-}
-.focal-preview {
-  height: 140px;
-  border-radius: 8px;
-  overflow: hidden;
-  margin: 4px 0 10px;
-}
-.focal-preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 .seed-list > div {
   display: flex;
@@ -1407,26 +2096,22 @@ textarea:focus-visible {
     font-size: 17px;
   }
 }
+/* Chips start at the top-left corner of the card and read downwards, with the
+   `+` row and any slack below them. These insets are the `seedBedInset` and
+   `seedBedBottom` that `seedLayout` measures against. */
 .seed_box .seed-bed {
-  position: relative;
+  position: absolute;
   display: block;
+  left: 14px;
+  right: 14px;
+  top: 14px;
+  bottom: 34px;
+  margin: 0;
   padding: 0;
-  margin-top: 20px;
 }
 .seed_box .seed {
   position: absolute;
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
   margin: 0;
-  line-height: 20px;
-}
-.seed_box .seed-bed {
-  position: absolute;
-  left: 22px;
-  right: 22px;
-  bottom: 22px;
-  margin-top: 0;
 }
 .canvas.is-panning,
 .canvas.is-panning .canvas-object {

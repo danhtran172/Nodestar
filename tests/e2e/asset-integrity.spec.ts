@@ -83,14 +83,17 @@ async function restoreTransactions(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((map) => {
-    if (sessionStorage.getItem('spread-fixture-loaded') === '1') return;
+    if (sessionStorage.getItem('nodestar-fixture-loaded') === '1') return;
     localStorage.clear();
-    localStorage.setItem('spread-recovery-v1', JSON.stringify(map));
+    // These specs cover free canvas placement; graph mode is exercised by
+    // graph-layout.spec.ts.
+    localStorage.setItem('nodestar-layout-mode', 'canvas');
+    localStorage.setItem('nodestar-recovery-v1', JSON.stringify(map));
   }, fixture);
   await page.goto('/');
   await expect(page.locator('[data-object="node"]')).toBeVisible();
   await page.evaluate(() =>
-    sessionStorage.setItem('spread-fixture-loaded', '1'),
+    sessionStorage.setItem('nodestar-fixture-loaded', '1'),
   );
 });
 
@@ -128,14 +131,14 @@ test('failed replacement keeps the old canonical image', async ({ page }) => {
   await pasteImages(page);
   await expect(node.locator('img')).toHaveCount(1);
   const before = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('spread-recovery-v1') || 'null'),
+    JSON.parse(localStorage.getItem('nodestar-recovery-v1') || 'null'),
   );
 
   await failNextAtomicTransaction(page);
   await pasteImages(page);
   await expect(node.locator('img')).toHaveCount(1);
   const after = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('spread-recovery-v1') || 'null'),
+    JSON.parse(localStorage.getItem('nodestar-recovery-v1') || 'null'),
   );
   expect(after.map.objects[0].images).toEqual(before.map.objects[0].images);
 });
@@ -146,7 +149,7 @@ test('removing a failed preview leaves the canonical map unchanged', async ({
   const node = page.locator('[data-object="node"]');
   await node.click({ position: { x: 6, y: 6 } });
   const before = await page.evaluate(() =>
-    localStorage.getItem('spread-recovery-v1'),
+    localStorage.getItem('nodestar-recovery-v1'),
   );
   await failNextAtomicTransaction(page);
   await pasteImages(page);
@@ -155,7 +158,7 @@ test('removing a failed preview leaves the canonical map unchanged', async ({
   await expect(page.getByRole('button', { name: 'Remove' })).toHaveCount(0);
   await expect(node.locator('img')).toHaveCount(0);
   expect(
-    await page.evaluate(() => localStorage.getItem('spread-recovery-v1')),
+    await page.evaluate(() => localStorage.getItem('nodestar-recovery-v1')),
   ).toBe(before);
   await page.screenshot({
     path: 'evidence/wp05-assets/remove-failed-preview.png',
@@ -167,7 +170,9 @@ test('partial Imagination batch commits successes and isolates one failure', asy
   page,
 }) => {
   const imagination = page.locator('[data-object="imagination"]');
-  await imagination.click({ position: { x: 6, y: 6 } });
+  await imagination.focus();
+  await page.keyboard.press(' ');
+  await expect(imagination).toHaveClass(/selected/);
   await failNextAtomicTransaction(page);
   await pasteImages(page, 2);
   await expect(imagination.locator('img')).toHaveCount(1);
@@ -241,21 +246,23 @@ test('map write failure aborts the asset and map transaction', async ({ page }) 
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
 });
 
-test('legacy orphan is quarantined without a broken image or false Retry', async ({
+test('legacy orphan remains referenced while the workspace reports it as unavailable', async ({
   page,
 }) => {
   await page.evaluate(() => {
-    const raw = JSON.parse(localStorage.getItem('spread-recovery-v1') || 'null');
+    const raw = JSON.parse(localStorage.getItem('nodestar-recovery-v1') || 'null');
     raw.objects[0].images = ['missing-asset'];
-    localStorage.setItem('spread-recovery-v1', JSON.stringify(raw));
+    localStorage.setItem('nodestar-recovery-v1', JSON.stringify(raw));
   });
   await page.reload();
-  await expect(page.locator('[data-object="node"] img')).toHaveCount(0);
+  await expect(page.locator('[data-object="node"] img')).toHaveCount(1);
   await expect(
     page.getByText(/Original image data is no longer available/),
   ).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Remove' }).click();
+  await expect(
+    page.locator('.image-repair-tray').getByRole('button', { name: 'Retry' }),
+  ).toHaveCount(0);
+  await page.locator('.image-repair-tray').getByRole('button', { name: 'Remove' }).click();
   await expect(page.getByText(/Original image data/)).toHaveCount(0);
 });
 
@@ -269,7 +276,7 @@ test('successful upload stores asset and referencing map in one revision', async
   const integrity = await page.evaluate(async () => {
     return new Promise<{ referenced: string; assetId: string }>(
       (resolve, reject) => {
-        const request = indexedDB.open('spread-workspace', 1);
+        const request = indexedDB.open('nodestar-workspace', 1);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const transaction = request.result.transaction(['maps', 'assets']);

@@ -25,20 +25,121 @@ export type Asset = {
   status: 'saved' | 'error';
   error?: string;
 };
-let database: Promise<IDBDatabase> | undefined;
-function db() {
-  return (database ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('spread-workspace', 1);
+const DATABASE = 'nodestar-workspace';
+// The product shipped as SPREAD. A renamed database is a different database, so
+// anything saved under the old name has to be copied across once, or the first
+// launch after the rename looks like total data loss.
+const LEGACY_DATABASE = 'spread-workspace';
+
+function open(name: string, version?: number) {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(name, version);
     request.onupgradeneeded = () => {
-      request.result.createObjectStore('maps');
-      request.result.createObjectStore('assets', { keyPath: 'id' });
+      const { objectStoreNames } = request.result;
+      if (!objectStoreNames.contains('maps'))
+        request.result.createObjectStore('maps');
+      if (!objectStoreNames.contains('assets'))
+        request.result.createObjectStore('assets', { keyPath: 'id' });
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => {
+    request.onerror = () => reject(request.error);
+    request.onblocked = () =>
+      reject(new Error('Close the other tabs using this map, then reload.'));
+  });
+}
+
+const all = <T,>(request: IDBRequest<T>) =>
+  new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+
+/**
+ * Copy a pre-rename database into the current one.
+ *
+ * The copy runs only while the current database still holds no map, so real
+ * work can never be overwritten by a stale copy, and an interrupted copy is
+ * simply retried on the next launch instead of stranding the old data. The
+ * legacy database is left in place as a fallback.
+ */
+async function adoptLegacyData(current: IDBDatabase) {
+  const existing = await Promise.all([
+    all(current.transaction('maps').objectStore('maps').get('current')),
+    all(current.transaction('maps').objectStore('maps').get('catalog')),
+  ]);
+  if (existing.some((value) => value !== undefined)) return;
+  if (typeof indexedDB.databases !== 'function') return;
+  let names: (string | undefined)[];
+  try {
+    names = (await indexedDB.databases()).map((entry) => entry.name);
+  } catch {
+    return;
+  }
+  if (!names.includes(LEGACY_DATABASE)) return;
+  let legacy: IDBDatabase | undefined;
+  try {
+    // No version: open whatever exists without triggering an upgrade.
+    legacy = await open(LEGACY_DATABASE);
+    const stores = legacy.objectStoreNames;
+    const map = stores.contains('maps')
+      ? await all(legacy.transaction('maps').objectStore('maps').get('current'))
+      : undefined;
+    const catalog = stores.contains('maps')
+      ? await all(legacy.transaction('maps').objectStore('maps').get('catalog'))
+      : undefined;
+    const assets = stores.contains('assets')
+      ? ((await all(
+          legacy.transaction('assets').objectStore('assets').getAll(),
+        )) as Asset[])
+      : [];
+    if (map === undefined && catalog === undefined && !assets.length) return;
+    // One transaction over both stores, so a failure leaves the current
+    // database empty and the next launch tries again.
+    await new Promise<void>((resolve, reject) => {
+      const tx = current.transaction(['maps', 'assets'], 'readwrite');
+      const mapStore = tx.objectStore('maps');
+      if (map !== undefined) mapStore.put(map, 'current');
+      if (catalog !== undefined) mapStore.put(catalog, 'catalog');
+      const assetStore = tx.objectStore('assets');
+      for (const asset of assets) assetStore.put(asset);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } catch {
+    /* Start clean rather than block the app on an unreadable old database. */
+  } finally {
+    legacy?.close();
+  }
+}
+
+let adopted: Promise<void> | undefined;
+/**
+ * Resolves once pre-rename data has been adopted, if there was any. Reads go
+ * through this so they never observe a half-migrated workspace; the first
+ * caller should await it *before* starting any read deadline, because copying
+ * image assets takes far longer than a steady-state read.
+ */
+export function storageReady() {
+  return (adopted ??= db()
+    .then(adoptLegacyData)
+    .catch(() => {}));
+}
+
+let database: Promise<IDBDatabase> | undefined;
+function db() {
+  return (database ??= (async () => {
+    try {
+      // Version 1 was released before image assets had their own store. Opening
+      // that database at the same version leaves it permanently unable to save
+      // images, because `onupgradeneeded` never runs. Bump the version and make
+      // the upgrade additive so existing maps stay untouched.
+      return await open(DATABASE, 2);
+    } catch (error) {
       database = undefined;
-      reject(request.error);
-    };
-  }));
+      throw error;
+    }
+  })());
 }
 async function put(store: string, value: unknown, key?: string) {
   const database = await db();
@@ -90,6 +191,7 @@ export async function saveMap(snapshot: WorkspaceSnapshot) {
   await saveAssetsAndMap([], snapshot);
 }
 export async function loadMap(): Promise<unknown> {
+  await storageReady();
   const database = await db();
   return new Promise((resolve, reject) => {
     const request = database
@@ -101,6 +203,7 @@ export async function loadMap(): Promise<unknown> {
   });
 }
 export async function loadMapCatalog(): Promise<unknown> {
+  await storageReady();
   const database = await db();
   return new Promise((resolve, reject) => {
     const request = database
@@ -115,6 +218,7 @@ export async function saveMapCatalog(catalog: MapCatalog) {
   await put('maps', catalog, 'catalog');
 }
 export async function loadAssets(): Promise<Record<string, Asset>> {
+  await storageReady();
   const database = await db();
   return new Promise((resolve, reject) => {
     const request = database

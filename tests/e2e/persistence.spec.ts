@@ -25,13 +25,16 @@ async function seed(
   await page.evaluate(
     async ({ local, database }) => {
       localStorage.clear();
+      // These specs cover free canvas placement; graph mode is exercised by
+      // graph-layout.spec.ts.
+      localStorage.setItem('nodestar-layout-mode', 'canvas');
       if (local !== null)
         localStorage.setItem(
-          'spread-recovery-v1',
+          'nodestar-recovery-v1',
           typeof local === 'string' ? local : JSON.stringify(local),
         );
       await new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open('spread-workspace', 1);
+        const request = indexedDB.open('nodestar-workspace', 1);
         request.onupgradeneeded = () => {
           if (!request.result.objectStoreNames.contains('maps'))
             request.result.createObjectStore('maps');
@@ -139,9 +142,9 @@ test('rapid writes keep local and database on the latest revision', async ({
   await expect(page.getByText('Saved on this device')).toBeVisible();
 
   const persisted = await page.evaluate(async () => {
-    const local = JSON.parse(localStorage.getItem('spread-recovery-v1') || 'null');
+    const local = JSON.parse(localStorage.getItem('nodestar-recovery-v1') || 'null');
     const database = await new Promise<unknown>((resolve, reject) => {
-      const request = indexedDB.open('spread-workspace', 1);
+      const request = indexedDB.open('nodestar-workspace', 1);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const get = request.result

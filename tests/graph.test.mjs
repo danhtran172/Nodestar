@@ -17,10 +17,51 @@ import {
   reflowBranch,
   moveObjects,
   seedLayout,
+  seedBedInset,
+  seedBoxChrome,
   objectHeight,
   imaginationDimensions,
-  seedCapacity,
+  imaginationWidth,
+  minPanelWidth,
+  panelHeight,
+  seedBoxWidth,
+  seedBoxHeight,
 } from '../lib/graph.ts';
+
+test('Imagination supports both collage and equal-tile geometry', () => {
+  const collage = imaginationDimensions(6, 'small', 'collage');
+  const uniform = imaginationDimensions(6, 'small', 'uniform');
+  // A collage widens the frame around its primary tile; equal tiles keep the
+  // preset width and grow downward instead.
+  assert.equal(collage.width, 336);
+  assert.equal(collage.height, 336);
+  assert.equal(uniform.width, imaginationWidth);
+  assert.equal(uniform.height, 147);
+});
+
+test('a Seed Box and an Imagination start as compact panels', () => {
+  const box = makeObject('SEED_BOX', { x: 0, y: 0 });
+  const mood = makeObject('IMAGINATION', { x: 0, y: 0 });
+  // A Seed Box starts landscape so its chips read across, not down.
+  assert.equal(box.width, seedBoxWidth);
+  assert.equal(box.height, seedBoxHeight);
+  assert.equal(objectHeight(box), seedBoxHeight);
+  assert.ok(box.width > box.height);
+  assert.equal(mood.width, imaginationWidth);
+  assert.equal(mood.height, panelHeight);
+  assert.equal(objectHeight(mood), panelHeight);
+  for (const o of [box, mood]) {
+    // The floor sits below the starting size, so a panel that was widened can
+    // be brought back down to the size it was created at.
+    assert.ok(o.width > minPanelWidth);
+  }
+  // An empty Imagination is exactly its preset, so being created and having
+  // its size re-derived agree.
+  assert.deepEqual(imaginationDimensions(0, 'small'), {
+    width: imaginationWidth,
+    height: panelHeight,
+  });
+});
 
 test('a copied selection is a valid independent map', () => {
   let m = setup();
@@ -57,7 +98,7 @@ test('local reflow preserves other branches and goal anchors', () => {
   assert.deepEqual(n.objects.slice(2), m.objects.slice(2));
   assert.notEqual(n.objects[0].y, m.objects[0].y);
 });
-test('seed layout is stable, bounded and accommodates long text', () => {
+test('seed chips are stable, bounded and accommodate long text', () => {
   let m = setup();
   const b = makeObject('SEED_BOX', { x: 0, y: 0 });
   m.objects.push(b);
@@ -72,11 +113,10 @@ test('seed layout is stable, bounded and accommodates long text', () => {
   assert.deepEqual(seedLayout(box), layout);
   for (const s of layout.positions) {
     assert.ok(s.x >= 0);
-    assert.ok(s.x + s.width < box.width - 44);
-    assert.ok(Math.abs(s.rotation) <= 35);
-    assert.ok(s.y + s.height < layout.height);
+    assert.ok(s.x + s.width <= box.width - seedBedInset * 2);
+    assert.ok(s.y + s.height <= layout.height);
   }
-  assert.ok(objectHeight(box) >= layout.height + 115);
+  assert.ok(objectHeight(box) >= layout.height + seedBoxChrome);
 });
 test('500-node shared downstream traversal and movement remain exact', (t) => {
   const m = setup(500);
@@ -119,11 +159,12 @@ test('reject cycles, self relations and mixed duplicates', () => {
   assert.ok(relationError(m, a.id, b.id, 'RELATED'));
   assert.equal(reachable(m, a.id).size, 3);
 });
-test('goal plus adds contributor; normal plus points outward', () => {
+test('plus points away from the goal by default, goal and node alike', () => {
   const m = setup();
   m.objects[0].role = 'GOAL';
   const g = branch(m, m.objects[0].id);
-  assert.equal(g.map.relationships[0].targetId, m.objects[0].id);
+  assert.equal(g.map.relationships[0].sourceId, m.objects[0].id);
+  assert.equal(g.map.relationships[0].targetId, g.object.id);
   const n = branch(m, m.objects[1].id);
   assert.equal(n.map.relationships[0].sourceId, m.objects[1].id);
 });
@@ -193,27 +234,13 @@ test('seed capacity promotion, transfer, and conversion preserve content', () =>
   let m = setup();
   const box = makeObject('SEED_BOX', { x: 0, y: 0 });
   m.objects.push(box);
-  for (let i = 0; i < 20; i++) m = addSeed(m, box.id, `seed ${i}`);
+  for (let i = 0; i < 30; i++) m = addSeed(m, box.id, `seed ${i}`);
   const b = m.objects.find((o) => o.id === box.id);
-  assert.equal(b.tier, 20);
-  assert.throws(() => addSeed(m, box.id, '21'), /Maximum/);
+  assert.equal(b.tier, 30);
+  assert.throws(() => addSeed(m, box.id, '31'), /Maximum/);
   const r = moveSeed(m, box.id, b.seeds[0].id, { x: 0, y: 300 });
   assert.equal(r.map.objects.find((o) => o.id === r.id).text, 'seed 0');
-  assert.equal(r.map.objects.find((o) => o.id === box.id).seeds.length, 19);
-});
-test('seed capacity is derived from the actual seed count', () => {
-  assert.equal(seedCapacity(0), 5);
-  assert.equal(seedCapacity(5), 5);
-  assert.equal(seedCapacity(6), 10);
-  assert.equal(seedCapacity(10), 10);
-  assert.equal(seedCapacity(11), 20);
-  assert.equal(seedCapacity(20), 20);
-});
-test('Imagination growth preserves the selected base preset', () => {
-  assert.deepEqual(imaginationDimensions(1, 'small'), { width: 320, height: 240 });
-  assert.deepEqual(imaginationDimensions(2, 'small'), { width: 384, height: 288 });
-  assert.deepEqual(imaginationDimensions(2, 'large'), { width: 696, height: 456 });
-  assert.deepEqual(imaginationDimensions(8, 'medium'), { width: 770, height: 525 });
+  assert.equal(r.map.objects.find((o) => o.id === box.id).seeds.length, 29);
 });
 test('type restrictions and reference direction', () => {
   let m = setup();

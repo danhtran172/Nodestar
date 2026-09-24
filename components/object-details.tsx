@@ -1,6 +1,5 @@
 'use client';
 /* oxlint-disable next/no-img-element -- Assets are device-local, preprocessed thumbnails, with originals used only in the explicit viewer. */
-import { useState } from 'react';
 import {
   Plus,
   Trash2,
@@ -9,6 +8,7 @@ import {
   ArrowUpRight,
   Image as ImageIcon,
   RotateCw,
+  RotateCcw,
 } from 'lucide-react';
 import {
   Sheet,
@@ -17,8 +17,18 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet';
-import { Slider } from '@/components/ui/slider';
-import type { CanvasObject } from '@/lib/graph';
+import { ImageCropEditor } from '@/components/image-crop-editor';
+import {
+  defaultImageCrop,
+  imageCrop,
+  imageCropPatch,
+  imaginationDimensions,
+  imaginationLayout,
+  type CanvasObject,
+  carriesPath,
+  maxPanelWidth,
+  minPanelWidth,
+} from '@/lib/graph';
 import type { Asset } from '@/lib/storage';
 type Props = {
   object: CanvasObject | null;
@@ -34,7 +44,6 @@ type Props = {
 };
 export function ObjectDetails(p: Props) {
   const o = p.object;
-  const [focal, setFocal] = useState<number | null>(null);
   return (
     <Sheet
       open={!!o}
@@ -55,14 +64,14 @@ export function ObjectDetails(p: Props) {
       >
         <SheetHeader>
           <SheetTitle>
-            {o?.type === 'NODE'
+            {o && carriesPath(o)
               ? 'A little more detail'
               : o?.type === 'SEED_BOX'
                 ? 'Your loose ideas'
                 : 'Inside your Imagination'}
           </SheetTitle>
           <SheetDescription>
-            {o?.type === 'NODE'
+            {o && carriesPath(o)
               ? 'Keep the canvas clear. Let the detail live here.'
               : o?.type === 'SEED_BOX'
                 ? 'Keep them loose, or let an idea take shape.'
@@ -72,22 +81,33 @@ export function ObjectDetails(p: Props) {
         {o && (
           <div className="detail-body" key={o.id}>
             <label className="field-label">
-              {o.type === 'NODE' ? 'Main text' : 'Title'}
+              {carriesPath(o) ? 'Main text' : 'Title'}
               <textarea
                 className="detail-input"
                 defaultValue={o.text}
                 key={`${o.id}-text-${o.text}`}
                 rows={3}
                 onChange={(e) => {
-                  if (e.target.value.trim())
-                    p.onDraft(o.id, { text: e.target.value });
+                  p.onDraft(o.id, { text: e.target.value });
                 }}
                 onBlur={(e) => {
                   const text = e.target.value.trim();
-                  if (text && text !== o.text) p.onPatch(o.id, { text });
+                  if (text !== o.text) p.onPatch(o.id, { text });
                 }}
               />
             </label>
+            {!carriesPath(o) && (
+              <label className="display-note-toggle">
+                <input
+                  type="checkbox"
+                  checked={o.displayTitle !== false}
+                  onChange={(e) =>
+                    p.onPatch(o.id, { displayTitle: e.target.checked })
+                  }
+                />
+                Display title below card
+              </label>
+            )}
             {o.type !== 'SEED_BOX' && (
               <label className="field-label">
                 Notes
@@ -105,7 +125,7 @@ export function ObjectDetails(p: Props) {
                 />
               </label>
             )}
-            {o.type === 'NODE' && o.note && (
+            {carriesPath(o) && o.note && (
               <label className="display-note-toggle">
                 <input
                   type="checkbox"
@@ -121,8 +141,8 @@ export function ObjectDetails(p: Props) {
                 <input
                   aria-label="Object width"
                   type="number"
-                  min={o.type === 'NODE' ? 160 : 280}
-                  max={o.type === 'NODE' ? 520 : 900}
+                  min={carriesPath(o) ? 160 : minPanelWidth}
+                  max={carriesPath(o) ? 520 : maxPanelWidth}
                   defaultValue={o.width}
                   key={o.width}
                   onBlur={(e) => {
@@ -130,14 +150,14 @@ export function ObjectDetails(p: Props) {
                     if (Number.isFinite(width))
                       p.onPatch(o.id, {
                         width: Math.max(
-                          o.type === 'NODE' ? 160 : 280,
-                          Math.min(o.type === 'NODE' ? 520 : 900, width),
+                          carriesPath(o) ? 160 : minPanelWidth,
+                          Math.min(carriesPath(o) ? 520 : maxPanelWidth, width),
                         ),
                       });
                   }}
                 />
               </label>
-              {o.type !== 'NODE' && (
+              {!carriesPath(o) && (
                 <label className="field-label">
                   Height
                   <input
@@ -223,22 +243,49 @@ export function ObjectDetails(p: Props) {
             ) : (
               <>
                 {o.type === 'IMAGINATION' && (
-                  <div className="field-label">
-                    Canvas size
-                    <select
+                  <>
+                    <div className="field-label">
+                      Canvas size
+                      <select
                       value={o.imaginationPreset || (o.width < 390 ? 'small' : o.width < 560 ? 'medium' : 'large')}
                       onChange={(e) => {
                         const preset = e.target.value as 'small' | 'medium' | 'large';
-                        const scale = o.images.length <= 1 ? 1 : o.images.length === 2 ? 1.2 : o.images.length === 3 ? 1.35 : o.images.length === 4 ? 1.5 : o.images.length === 5 ? 1.62 : 1.75;
-                        const base = preset === 'small' ? { width: 320, height: 240 } : preset === 'medium' ? { width: 440, height: 300 } : { width: 580, height: 380 };
-                        p.onPatch(o.id, { imaginationPreset: preset, width: Math.round(base.width * scale), height: Math.round(base.height * scale) });
+                        p.onPatch(o.id, {
+                          imaginationPreset: preset,
+                          ...imaginationDimensions(
+                            o.images.length,
+                            preset,
+                            o.imaginationLayout,
+                          ),
+                        });
                       }}
                     >
                       <option value="small">Small</option>
                       <option value="medium">Medium</option>
                       <option value="large">Large</option>
-                    </select>
-                  </div>
+                      </select>
+                    </div>
+                    <div className="field-label">
+                      Image layout
+                      <select
+                      value={imaginationLayout(o.imaginationLayout)}
+                      onChange={(e) => {
+                        const layout = e.target.value as 'collage' | 'uniform';
+                        p.onPatch(o.id, {
+                          imaginationLayout: layout,
+                          ...imaginationDimensions(
+                            o.images.length,
+                            o.imaginationPreset,
+                            layout,
+                          ),
+                        });
+                      }}
+                    >
+                      <option value="uniform">Equal tiles</option>
+                      <option value="collage">Collage</option>
+                      </select>
+                    </div>
+                  </>
                 )}
                 <div className="section-line">
                   <span>
@@ -270,17 +317,27 @@ export function ObjectDetails(p: Props) {
                 <div className="asset-list">
                   {o.images.map((id, i) => {
                     const a = p.assets[id];
+                    const crop = imageCrop(o, id);
+                    const cropped =
+                      crop.x !== defaultImageCrop.x ||
+                      crop.y !== defaultImageCrop.y ||
+                      crop.scale !== defaultImageCrop.scale;
                     return (
-                      <div className="asset-row" key={id}>
-                        <button
+                      <div
+                        className={`asset-row ${o.role === 'GOAL' ? 'wide' : ''}`}
+                        key={id}
+                      >
+                        <ImageCropEditor
                           className="asset-preview"
-                          onClick={() => p.onView(id)}
-                        >
-                          <img
-                            src={a?.preview}
-                            alt={a?.filename || 'Image unavailable'}
-                          />
-                        </button>
+                          src={a?.preview}
+                          alt={a?.filename || 'Image unavailable'}
+                          crop={crop}
+                          aspect={a && a.height ? a.width / a.height : undefined}
+                          onCommit={(next) =>
+                            p.onPatch(o.id, imageCropPatch(o, id, next))
+                          }
+                          onOpen={() => p.onView(id)}
+                        />
                         <div>
                           <span className="asset-name">
                             {a?.filename || 'Image unavailable'}
@@ -332,13 +389,30 @@ export function ObjectDetails(p: Props) {
                             >
                               <ImageIcon size={15} />
                             </button>
+                            {cropped && (
+                              <button
+                                title="Reset crop"
+                                aria-label="Reset crop"
+                                onClick={() =>
+                                  p.onPatch(
+                                    o.id,
+                                    imageCropPatch(o, id, defaultImageCrop),
+                                  )
+                                }
+                              >
+                                <RotateCcw size={15} />
+                              </button>
+                            )}
                             <button
                               title="Remove image"
-                              onClick={() =>
+                              onClick={() => {
+                                const crops = { ...o.crops };
+                                delete crops[id];
                                 p.onPatch(o.id, {
                                   images: o.images.filter((x) => x !== id),
-                                })
-                              }
+                                  crops,
+                                });
+                              }}
                             >
                               <Trash2 size={15} />
                             </button>
@@ -348,31 +422,6 @@ export function ObjectDetails(p: Props) {
                     );
                   })}
                 </div>
-                {o.type === 'NODE' && o.images.length > 0 && (
-                  <div className="field-label">
-                    <span>Image focal area</span>
-                    <div className="focal-preview">
-                      <img
-                        src={p.assets[o.images[0]]?.preview}
-                        alt="Crop preview"
-                        style={{ objectPosition: `50% ${focal ?? o.focal}%` }}
-                      />
-                    </div>
-                    <Slider
-                      aria-label="Image focal area"
-                      value={[focal ?? o.focal]}
-                      min={0}
-                      max={100}
-                      onValueChange={(v) =>
-                        setFocal(Array.isArray(v) ? v[0] : v)
-                      }
-                      onValueCommitted={(v) => {
-                        p.onPatch(o.id, { focal: Array.isArray(v) ? v[0] : v });
-                        setFocal(null);
-                      }}
-                    />
-                  </div>
-                )}
               </>
             )}
           </div>

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { nextVisualShuffle, seedLayout } from '../lib/graph.ts';
+import { nextVisualShuffle, seedLayout, shuffleSeeds } from '../lib/graph.ts';
 
 const seedBox = (count, width = 310, long = false) => ({
   id: 'box',
@@ -30,34 +30,26 @@ const seedBox = (count, width = 310, long = false) => ({
   updatedAt: 1,
 });
 
-function bounds(position) {
-  const angle = (Math.abs(position.rotation) * Math.PI) / 180;
-  const width =
-    Math.abs(Math.cos(angle)) * position.width +
-    Math.sin(angle) * position.height;
-  const height =
-    Math.sin(angle) * position.width +
-    Math.abs(Math.cos(angle)) * position.height;
-  return {
-    left: position.x - (width - position.width) / 2,
-    right: position.x + position.width + (width - position.width) / 2,
-    top: position.y - (height - position.height) / 2,
-    bottom: position.y + position.height + (height - position.height) / 2,
-  };
-}
+const mapWith = (object) => ({
+  version: 1,
+  title: 'Seeds',
+  anchorId: object.id,
+  objects: [object],
+  relationships: [],
+});
 
 function overlaps(a, b) {
   return (
-    a.left < b.right &&
-    a.right > b.left &&
-    a.top < b.bottom &&
-    a.bottom > b.top
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
   );
 }
 
 for (const count of [1, 10, 11, 20, 21, 30]) {
   for (const width of [240, 480]) {
-    test(`${count} seeds remain deterministic, bounded and collision-free at ${width}px`, () => {
+    test(`${count} chips flow in reading order, bounded and collision-free at ${width}px`, () => {
       const box = seedBox(count, width, count === 30);
       const layout = seedLayout(box);
       assert.deepEqual(seedLayout(box), layout);
@@ -65,38 +57,63 @@ for (const count of [1, 10, 11, 20, 21, 30]) {
         layout.positions.map(({ seed }) => seed.id),
         box.seeds.map(({ id }) => id),
       );
-      const rectangles = layout.positions.map(bounds);
+      const available = width - 28;
       for (let index = 0; index < layout.positions.length; index++) {
-        const position = layout.positions[index];
-        const rectangle = rectangles[index];
-        assert.ok(Math.abs(position.rotation) <= 35);
-        if (position.height <= 64)
-          assert.ok(
-            Math.abs(position.rotation) >= 5 &&
-              Math.abs(position.rotation) <= 15,
-          );
-        assert.ok(rectangle.left >= -0.001);
-        assert.ok(rectangle.right <= width - 44 + 0.001);
-        assert.ok(rectangle.top >= -0.001);
-        assert.ok(rectangle.bottom <= layout.height + 0.001);
-        for (let other = index + 1; other < rectangles.length; other++)
-          assert.equal(overlaps(rectangle, rectangles[other]), false);
+        const chip = layout.positions[index];
+        assert.ok(chip.x >= 0);
+        assert.ok(chip.x + chip.width <= available + 0.001);
+        assert.ok(chip.y >= 0);
+        assert.ok(chip.y + chip.height <= layout.height + 0.001);
+        // A chip is one text line tall unless it genuinely wrapped.
+        assert.equal(chip.multiline, chip.height > 32);
+        for (let other = index + 1; other < layout.positions.length; other++)
+          assert.equal(overlaps(chip, layout.positions[other]), false);
       }
     });
   }
 }
 
-test('shuffle advances deterministically and produces a new composition', () => {
-  const box = seedBox(10);
-  const next = nextVisualShuffle(box.shuffle);
-  assert.equal(nextVisualShuffle(box.shuffle), next);
-  assert.notEqual(next, box.shuffle);
-  assert.notEqual(nextVisualShuffle(next), next);
-  const before = seedLayout(box);
-  const after = seedLayout({ ...box, shuffle: next });
-  assert.notDeepEqual(
-    before.positions.map(({ x, y, rotation }) => ({ x, y, rotation })),
-    after.positions.map(({ x, y, rotation }) => ({ x, y, rotation })),
+test('chips are packed left to right with a small, fixed gap', () => {
+  const layout = seedLayout(seedBox(10, 480));
+  const firstRow = layout.positions.filter(({ y }) => y === 0);
+  assert.ok(firstRow.length > 1);
+  assert.equal(firstRow[0].x, 0);
+  for (let index = 1; index < firstRow.length; index++)
+    assert.equal(
+      firstRow[index].x,
+      firstRow[index - 1].x + firstRow[index - 1].width + 6,
+    );
+});
+
+test('layout does not depend on the shuffle value or the box height', () => {
+  const box = seedBox(12);
+  assert.deepEqual(
+    seedLayout({ ...box, shuffle: nextVisualShuffle(box.shuffle) }),
+    seedLayout(box),
   );
-  assert.ok(new Set(after.positions.map(({ x }) => Math.round(x))).size > 1);
+  assert.deepEqual(seedLayout({ ...box, height: box.height + 240 }), seedLayout(box));
+});
+
+test('Shuffle reorders the seeds themselves and advances deterministically', () => {
+  const box = seedBox(10);
+  const before = mapWith(box);
+  const after = shuffleSeeds(before, 'box').objects[0];
+  assert.equal(after.shuffle, nextVisualShuffle(box.shuffle));
+  const byId = (a, b) => a.localeCompare(b);
+  assert.deepEqual(
+    after.seeds.map(({ id }) => id).sort(byId),
+    box.seeds.map(({ id }) => id).sort(byId),
+  );
+  assert.notDeepEqual(
+    after.seeds.map(({ id }) => id),
+    box.seeds.map(({ id }) => id),
+  );
+  assert.deepEqual(shuffleSeeds(before, 'box'), shuffleSeeds(before, 'box'));
+});
+
+test('Shuffle leaves a box with fewer than two seeds untouched', () => {
+  for (const count of [0, 1]) {
+    const before = mapWith(seedBox(count));
+    assert.equal(shuffleSeeds(before, 'box'), before);
+  }
 });

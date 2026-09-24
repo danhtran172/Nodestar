@@ -60,7 +60,7 @@ async function center(locator: Locator) {
 
 async function persistedMap(page: Page): Promise<VisionMap> {
   return page.evaluate(() => {
-    const value = JSON.parse(localStorage.getItem('spread-recovery-v1') || 'null');
+    const value = JSON.parse(localStorage.getItem('nodestar-recovery-v1') || 'null');
     return value.map || value;
   });
 }
@@ -68,7 +68,10 @@ async function persistedMap(page: Page): Promise<VisionMap> {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((map) => {
     localStorage.clear();
-    localStorage.setItem('spread-recovery-v1', JSON.stringify(map));
+    // These specs cover free canvas placement; graph mode is exercised by
+    // graph-layout.spec.ts.
+    localStorage.setItem('nodestar-layout-mode', 'canvas');
+    localStorage.setItem('nodestar-recovery-v1', JSON.stringify(map));
   }, fixture);
   await page.goto('/');
   await expect(page.locator('[data-object="root"]')).toBeVisible();
@@ -150,6 +153,60 @@ test('object bounds collision is resolved even when pointer misses obstacle', as
       preview.y + preview.height <= fixed.y ||
       preview.y >= fixed.y + fixed.height,
   ).toBe(true);
+  await page.mouse.up();
+  expect(await root.boundingBox()).toEqual(preview);
+});
+
+test('a card crosses another card during the drag and settles only on release', async ({
+  page,
+}) => {
+  const root = page.locator('[data-object="root"]');
+  const target = page.locator('[data-object="target"]');
+  const from = await center(root);
+  const resting = await target.boundingBox();
+  const start = await root.boundingBox();
+  if (!resting || !start) throw new Error('Expected visible objects');
+
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  // Straight down onto the resting card. The drag must track the pointer
+  // instead of being pushed above or below the card it passes over.
+  await page.mouse.move(from.x, from.y + (resting.y - start.y), { steps: 12 });
+
+  const inFlight = await root.boundingBox();
+  if (!inFlight) throw new Error('Expected a dragged card');
+  expect(Math.abs(inFlight.y - resting.y)).toBeLessThan(2);
+  expect(Math.abs(inFlight.x - start.x)).toBeLessThan(2);
+  const overlapping =
+    inFlight.x < resting.x + resting.width &&
+    inFlight.x + inFlight.width > resting.x &&
+    inFlight.y < resting.y + resting.height &&
+    inFlight.y + inFlight.height > resting.y;
+  expect(overlapping).toBe(true);
+  await expect(root).toHaveClass(/floating/);
+
+  await page.mouse.up();
+  await expect(root).not.toHaveClass(/floating/);
+  const settled = await root.boundingBox();
+  if (!settled) throw new Error('Expected a settled card');
+  expect(
+    settled.x + settled.width <= resting.x ||
+      settled.x >= resting.x + resting.width ||
+      settled.y + settled.height <= resting.y ||
+      settled.y >= resting.y + resting.height,
+  ).toBe(true);
+});
+
+test('a drag that ends over free space keeps exactly the previewed position', async ({
+  page,
+}) => {
+  const root = page.locator('[data-object="root"]');
+  const from = await center(root);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x, from.y - 260, { steps: 10 });
+  await expect(root).not.toHaveClass(/floating/);
+  const preview = await root.boundingBox();
   await page.mouse.up();
   expect(await root.boundingBox()).toEqual(preview);
 });

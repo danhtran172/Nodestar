@@ -45,9 +45,18 @@ async function seedStyles(box: Locator) {
   );
 }
 
+/** Chip reading order, which is what Shuffle rearranges. */
+async function seedOrder(box: Locator) {
+  return box
+    .locator('[data-seed]')
+    .evaluateAll((elements) =>
+      elements.map((element) => (element as HTMLElement).dataset.seed),
+    );
+}
+
 async function persistedShuffle(page: Page) {
   return page.evaluate(() => {
-    const value = JSON.parse(localStorage.getItem('spread-recovery-v1') || 'null');
+    const value = JSON.parse(localStorage.getItem('nodestar-recovery-v1') || 'null');
     const map = value.map || value;
     return map.objects.find(
       (object: { id: string; shuffle: number }) => object.id === 'box',
@@ -71,17 +80,25 @@ for (const [name, count, width, long] of matrix) {
   test(`visual matrix ${name}`, async ({ page }) => {
     await page.addInitScript((map) => {
       localStorage.clear();
-      localStorage.setItem('spread-recovery-v1', JSON.stringify(map));
+      // These specs cover free canvas placement; graph mode is exercised by
+      // graph-layout.spec.ts.
+      localStorage.setItem('nodestar-layout-mode', 'canvas');
+      localStorage.setItem('nodestar-recovery-v1', JSON.stringify(map));
     }, fixture(count, width, long));
     await page.goto('/');
     const box = page.locator('[data-object="box"]');
     await expect(box).toBeVisible();
     await expect(box.locator('[data-seed]')).toHaveCount(count);
     if (count > 1) {
-      const xCoordinates = await box.locator('[data-seed]').evaluateAll((items) =>
-        items.map((item) => Math.round(item.getBoundingClientRect().x)),
+      // Chips flow left to right and wrap, so every one of them occupies its
+      // own slot. A narrow box may only fit one chip per row.
+      const slots = await box.locator('[data-seed]').evaluateAll((items) =>
+        items.map((item) => {
+          const rectangle = item.getBoundingClientRect();
+          return `${Math.round(rectangle.x)},${Math.round(rectangle.y)}`;
+        }),
       );
-      expect(new Set(xCoordinates).size).toBeGreaterThan(1);
+      expect(new Set(slots).size).toBe(count);
     }
     await page.screenshot({
       path: `evidence/wp07-seed-layout/matrix-${name}.png`,
@@ -90,58 +107,73 @@ for (const [name, count, width, long] of matrix) {
   });
 }
 
-test('Shuffle changes composition and reload keeps it', async ({ page }) => {
+test('Shuffle reorders the chips and reload keeps that order', async ({
+  page,
+}) => {
   await page.addInitScript((map) => {
-    if (sessionStorage.getItem('spread-fixture-loaded') === '1') return;
+    if (sessionStorage.getItem('nodestar-fixture-loaded') === '1') return;
     localStorage.clear();
-    localStorage.setItem('spread-recovery-v1', JSON.stringify(map));
+    // These specs cover free canvas placement; graph mode is exercised by
+    // graph-layout.spec.ts.
+    localStorage.setItem('nodestar-layout-mode', 'canvas');
+    localStorage.setItem('nodestar-recovery-v1', JSON.stringify(map));
   }, fixture(10));
   await page.goto('/');
-  await page.evaluate(() => sessionStorage.setItem('spread-fixture-loaded', '1'));
+  await page.evaluate(() => sessionStorage.setItem('nodestar-fixture-loaded', '1'));
   const box = page.locator('[data-object="box"]');
-  const before = await seedStyles(box);
+  await expect(box.locator('[data-seed]')).toHaveCount(10);
+  const before = await seedOrder(box);
   await box.click({ position: { x: 6, y: 6 } });
   await page.getByRole('button', { name: 'Shuffle' }).click();
-  const after = await seedStyles(box);
+  const after = await seedOrder(box);
   expect(after).not.toEqual(before);
+  const byId = (a?: string, b?: string) => (a || '').localeCompare(b || '');
+  expect([...after].sort(byId)).toEqual([...before].sort(byId));
   await expect(page.getByText('Saved on this device')).toBeVisible();
   await page.reload();
   await expect(box.locator('[data-seed]')).toHaveCount(10);
-  expect(await seedStyles(box)).toEqual(after);
+  expect(await seedOrder(box)).toEqual(after);
 });
 
-test('successful Seed Box move reshuffles once and Undo restores composition', async ({
+test('moving a Seed Box leaves its chips exactly where they were', async ({
   page,
 }) => {
   await page.addInitScript((map) => {
     localStorage.clear();
-    localStorage.setItem('spread-recovery-v1', JSON.stringify(map));
+    // These specs cover free canvas placement; graph mode is exercised by
+    // graph-layout.spec.ts.
+    localStorage.setItem('nodestar-layout-mode', 'canvas');
+    localStorage.setItem('nodestar-recovery-v1', JSON.stringify(map));
   }, fixture(10));
   await page.goto('/');
   const box = page.locator('[data-object="box"]');
   await expect(box.locator('[data-seed]')).toHaveCount(10);
   const beforeShuffle = await persistedShuffle(page);
   const beforeStyles = await seedStyles(box);
+  const beforeOrder = await seedOrder(box);
   const bounds = await box.boundingBox();
   if (!bounds) throw new Error('Seed Box is not visible');
   await page.mouse.move(bounds.x + 8, bounds.y + 8);
   await page.mouse.down();
   await page.mouse.move(bounds.x + 88, bounds.y + 48, { steps: 8 });
   await page.mouse.up();
-  await expect.poll(() => persistedShuffle(page)).not.toBe(beforeShuffle);
-  expect(await seedStyles(box)).not.toEqual(beforeStyles);
-  await page.keyboard.press('Control+z');
-  await expect.poll(() => persistedShuffle(page)).toBe(beforeShuffle);
-  await expect.poll(async () => JSON.stringify(await seedStyles(box))).toBe(
-    JSON.stringify(beforeStyles),
-  );
+  // The box lands somewhere new; the chips inside it are untouched.
+  await expect
+    .poll(async () => (await box.boundingBox())?.x)
+    .not.toBe(bounds.x);
+  expect(await persistedShuffle(page)).toBe(beforeShuffle);
+  expect(await seedOrder(box)).toEqual(beforeOrder);
+  expect(await seedStyles(box)).toEqual(beforeStyles);
 });
 
 test('reduced motion disables seed settle animation', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.addInitScript((map) => {
     localStorage.clear();
-    localStorage.setItem('spread-recovery-v1', JSON.stringify(map));
+    // These specs cover free canvas placement; graph mode is exercised by
+    // graph-layout.spec.ts.
+    localStorage.setItem('nodestar-layout-mode', 'canvas');
+    localStorage.setItem('nodestar-recovery-v1', JSON.stringify(map));
   }, fixture(10));
   await page.goto('/');
   const duration = await page

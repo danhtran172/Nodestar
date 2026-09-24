@@ -1,4 +1,4 @@
-const CACHE = 'spread-shell-v1';
+const CACHE = 'nodestar-shell-v1';
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
@@ -26,7 +26,13 @@ self.addEventListener('activate', (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((k) => k.startsWith('spread-shell-') && k !== CACHE)
+            .filter(
+              (k) =>
+                (k.startsWith('nodestar-shell-') ||
+                  // Shells cached before the rename from SPREAD.
+                  k.startsWith('spread-shell-')) &&
+                k !== CACHE,
+            )
             .map((k) => caches.delete(k)),
         ),
       )
@@ -67,7 +73,7 @@ self.addEventListener('fetch', (event) => {
         const cached = await caches.match(request);
         if (cached) return cached;
         return new Response(
-          'SPREAD is offline. Open it once online to prepare this device.',
+          'Nodestar is offline. Open it once online to prepare this device.',
           { status: 503, headers: { 'Content-Type': 'text/plain' } },
         );
       }),

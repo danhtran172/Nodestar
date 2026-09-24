@@ -13,7 +13,7 @@ test('image paste is rejected only when more than one object is selected', () =>
   assert.equal(shouldRejectImagePaste(['text/plain'], 2), false);
 });
 
-test('missing image references are quarantined without mutating valid objects', () => {
+test('missing image references are reported without removing them from the map', () => {
   const valid = {
     id: 'valid',
     type: 'NODE',
@@ -43,6 +43,6 @@ test('missing image references are quarantined without mutating valid objects', 
   const result = quarantineMissingAssetReferences(map, new Set(['asset-ok']));
   assert.deepEqual(result.missing, ['asset-missing']);
   assert.equal(result.map.objects[0], valid);
-  assert.deepEqual(result.map.objects[1].images, []);
-  assert.deepEqual(map.objects[1].images, ['asset-missing']);
+  assert.equal(result.map, map);
+  assert.deepEqual(result.map.objects[1].images, ['asset-missing']);
 });

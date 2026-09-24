@@ -1,4 +1,4 @@
-import SpreadEditor from '@/components/spread-editor';
+import NodestarEditor from '@/components/nodestar-editor';
 export default function Home() {
-  return <SpreadEditor />;
+  return <NodestarEditor />;
 }

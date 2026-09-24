@@ -1,7 +1,122 @@
-export type Kind = 'NODE' | 'SEED_BOX' | 'IMAGINATION';
+export type Kind = 'NODE' | 'SEED_BOX' | 'IMAGINATION' | 'GRAPH';
 export type ImaginationPreset = 'small' | 'medium' | 'large';
+export type ImaginationLayout =
+  | 'collage'
+  | 'uniform'
+  // Values written by the first layout-switch version remain valid.
+  | 'gapless'
+  | 'spaced';
 export type RelationType = 'PATH' | 'RELATED' | 'REFERENCE';
 export type Seed = { id: string; text: string; visualSeed: number };
+/**
+ * How an image sits inside the frame that clips it. `x`/`y` are the point of
+ * the image (in percent) kept at the same percent of the frame; `scale` zooms
+ * around that point, 1 being the plain cover fit. Above 1 the image spills
+ * past the frame and `x`/`y` choose which part shows; below 1 it sits inside
+ * the frame and they choose where.
+ */
+export type ImageCrop = { x: number; y: number; scale: number };
+export const minImageScale = 0.25;
+export const maxImageScale = 5;
+export const defaultImageCrop: ImageCrop = { x: 50, y: 50, scale: 1 };
+export function imageCrop(o: CanvasObject, imageId: string): ImageCrop {
+  return (
+    o.crops?.[imageId] || { x: o.focalX ?? 50, y: o.focal ?? 50, scale: 1 }
+  );
+}
+/** Keeps a crop inside the range the frame can show. */
+export function clampImageCrop(crop: ImageCrop): ImageCrop {
+  const bound = (value: number, low: number, high: number) =>
+    Math.min(high, Math.max(low, Number.isFinite(value) ? value : low));
+  return {
+    x: bound(crop.x, 0, 100),
+    y: bound(crop.y, 0, 100),
+    scale: bound(crop.scale, minImageScale, maxImageScale),
+  };
+}
+/**
+ * The patch that stores a crop for one of an object's images. Node images
+ * also keep the older focal fields in step, so anything still reading them
+ * sees the same point.
+ */
+export function imageCropPatch(
+  o: CanvasObject,
+  imageId: string,
+  crop: ImageCrop,
+): Partial<CanvasObject> {
+  const next = clampImageCrop(crop);
+  return {
+    crops: { ...o.crops, [imageId]: next },
+    ...(o.type === 'NODE' ? { focal: next.y, focalX: next.x } : {}),
+  };
+}
+/** Inline style that frames an image by its crop; the frame must clip overflow. */
+export function imageCropStyle(crop: ImageCrop) {
+  const origin = `${crop.x}% ${crop.y}%`;
+  return {
+    objectPosition: origin,
+    transformOrigin: origin,
+    transform: crop.scale === 1 ? undefined : `scale(${crop.scale})`,
+  };
+}
+/**
+ * Moves the image by `dx`,`dy` frame pixels, expressed as the crop point that
+ * puts it there. The frame is `width` x `height`, the image `aspect` wide for
+ * every unit tall. An axis where the image exactly fills the frame has no
+ * room to move and stays where it is.
+ */
+export function panImageCrop(
+  crop: ImageCrop,
+  dx: number,
+  dy: number,
+  width: number,
+  height: number,
+  aspect: number,
+): ImageCrop {
+  // Negative overflow means the image is smaller than the frame; the same
+  // arithmetic then slides it about inside the frame instead.
+  const { x, y } = cropOverflow(crop.scale, width, height, aspect);
+  return clampImageCrop({
+    ...crop,
+    x: Math.abs(x) > 0.5 ? crop.x - (dx * 100) / x : crop.x,
+    y: Math.abs(y) > 0.5 ? crop.y - (dy * 100) / y : crop.y,
+  });
+}
+/**
+ * Zooms the crop so the image point under (`atX`,`atY`) in the frame stays
+ * under it, like zooming a map under the pointer.
+ */
+export function zoomImageCrop(
+  crop: ImageCrop,
+  scale: number,
+  atX: number,
+  atY: number,
+  width: number,
+  height: number,
+  aspect: number,
+): ImageCrop {
+  const next = clampImageCrop({ ...crop, scale });
+  const ratio = next.scale / crop.scale;
+  // Scaling around the crop point pushes the point under the pointer outward;
+  // panning it back by that much keeps it still.
+  const dx = -(ratio - 1) * (atX - (width * crop.x) / 100);
+  const dy = -(ratio - 1) * (atY - (height * crop.y) / 100);
+  return panImageCrop(next, dx, dy, width, height, aspect);
+}
+/**
+ * How many frame pixels of the image lie beyond each edge pair at `scale`;
+ * negative when the image falls short of the frame on that axis.
+ */
+function cropOverflow(
+  scale: number,
+  width: number,
+  height: number,
+  aspect: number,
+) {
+  const fitWidth = Math.max(width, height * aspect);
+  const fitHeight = Math.max(height, width / aspect);
+  return { x: scale * fitWidth - width, y: scale * fitHeight - height };
+}
 export type CanvasObject = {
   id: string;
   type: Kind;
@@ -17,9 +132,30 @@ export type CanvasObject = {
   tier: number;
   shuffle: number;
   focal: number;
+  /** Horizontal image crop position; omitted maps created before crop dragging. */
+  focalX?: number;
+  /**
+   * How each image sits in its frame, keyed by asset id. An image without an
+   * entry falls back to `focal`/`focalX` at 1x, which is how Node images were
+   * cropped before zooming existed.
+   */
+  crops?: Record<string, ImageCrop>;
   displayNote?: boolean;
+  /** Keeps a Seed Box or Imagination title visible below its card. */
+  displayTitle?: boolean;
+  /** Records a height explicitly chosen by resizing a Node on the canvas. */
+  manualHeight?: boolean;
   imaginationPreset?: ImaginationPreset;
+  /** `uniform` gives every image an equal tile; `collage` emphasizes the first. */
+  imaginationLayout?: ImaginationLayout;
   attachment?: string;
+  /**
+   * For a GRAPH object, the catalog entry it stands for. The linked map owns
+   * its own objects; this one only shows that map's central goal.
+   */
+  mapRef?: string;
+  /** Folds everything hanging off this object out of sight. */
+  collapsed?: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -29,20 +165,125 @@ export type Relationship = {
   targetId: string;
   type: RelationType;
 };
+/**
+ * Which way a new PATH arrow points: away from the central goal toward the
+ * branches (`outward`), or from the branches in toward the goal (`inward`).
+ */
+export type PathDirection = 'outward' | 'inward';
 export type VisionMap = {
   version: 1;
   title: string;
   anchorId: string;
   objects: CanvasObject[];
   relationships: Relationship[];
+  /**
+   * The direction every PATH created from now on takes. Changing it leaves the
+   * paths already drawn as they are; each of those can still be reversed.
+   * Omitted means `outward`.
+   */
+  pathDirection?: PathDirection;
 };
+export function pathDirection(map: VisionMap): PathDirection {
+  return map.pathDirection === 'inward' ? 'inward' : 'outward';
+}
+/** The end of a PATH that hangs below the other, by the map's arrow direction. */
+function childEnd(map: VisionMap, edge: { sourceId: string; targetId: string }) {
+  return pathDirection(map) === 'inward' ? edge.sourceId : edge.targetId;
+}
+/** The PATH that ranks `id` under its parent, if there is one. */
+function attachmentFor(
+  map: VisionMap,
+  relationships: Relationship[],
+  id: string,
+) {
+  return relationships.find((e) => e.type === 'PATH' && childEnd(map, e) === id)
+    ?.id;
+}
+/**
+ * `id` and everything that hangs below it along PATHs, following arrows in
+ * whichever direction the map draws them.
+ */
+export function downstream(map: VisionMap, id: string): Set<string> {
+  return reachable(map, id, pathDirection(map) === 'inward');
+}
+/** Placeholder titles a map carries until someone names it. */
+const unnamedTitles = new Set(['', 'Untitled vision']);
+/**
+ * Names an unnamed map after its central goal the first time that goal is
+ * given text. A map someone has already named keeps its name, and once the
+ * title has been taken from the goal it is a real name and stays put.
+ */
+export function syncTitleFromGoal(
+  before: VisionMap,
+  next: VisionMap,
+): VisionMap {
+  if (!unnamedTitles.has(next.title.trim())) return next;
+  const goal = next.objects.find((o) => o.id === next.anchorId);
+  if (!goal || goal.type !== 'NODE') return next;
+  const text = goal.text.trim();
+  if (!text) return next;
+  const previous = before.objects.find((o) => o.id === goal.id);
+  if (previous?.text.trim()) return next;
+  return { ...next, title: text };
+}
 export type Point = { x: number; y: number };
+/**
+ * A Seed Box and an Imagination are panels rather than cards: they start at
+ * this size and can be dragged between these bounds. The floor sits below the
+ * starting size so a resized panel can be brought back down to it.
+ */
+export const panelWidth = 217;
+export const imaginationWidth = 224;
+export const panelHeight = 168;
+/**
+ * A Seed Box starts as a landscape rectangle, wide enough for two or three
+ * chips per row so loose ideas read across rather than as one tall column.
+ */
+export const seedBoxWidth = 320;
+export const seedBoxHeight = 140;
+export const minPanelWidth = 196;
+export const maxPanelWidth = 900;
+export const minPanelHeight = 126;
+/**
+ * Seed chip metrics. The bed is inset from the card edge on three sides and
+ * `seedBoxChrome` is the vertical space it never occupies: the `+` row above
+ * it plus the bottom inset.
+ */
+export const seedBedInset = 14;
+export const seedChipGap = 6;
+export const seedChipRowGap = 6;
+/** The `+` row sits under the bed, so the chips start at the inset. */
+export const seedBedBottom = 34;
+export const seedBoxChrome = seedBedInset + seedBedBottom;
+const chipPaddingX = 10;
+const chipPaddingY = 6;
+const chipBorder = 1;
+const chipLineHeight = 18;
+/**
+ * A chip is measured from its character count rather than from the rendered
+ * text, so the layout stays pure. The estimate runs a little wide, and the
+ * cushion covers the strings that sit above the average, so a chip sized for
+ * one line never wraps to two.
+ */
+const chipCharacterWidth = 7;
+const chipTextCushion = 4;
+/** The convert handle rides inside the chip, after its text. */
+const chipHandleWidth = 22;
+const chipMinWidth = 52;
+/**
+ * Kinds that sit on a PATH. A GRAPH object stands for another map's central
+ * goal, so within this map it behaves exactly like the node it represents.
+ */
+export function carriesPath(o: CanvasObject) {
+  return o.type === 'NODE' || o.type === 'GRAPH';
+}
 export const uid = () => crypto.randomUUID();
 export function makeObject(
   type: Kind,
   p: Point,
   role: CanvasObject['role'] = 'NORMAL',
   text = '',
+  mapRef?: string,
 ): CanvasObject {
   return {
     id: uid(),
@@ -50,17 +291,36 @@ export function makeObject(
     role,
     text,
     note: '',
+    mapRef: type === 'GRAPH' ? mapRef : undefined,
     ...p,
-    width: type === 'NODE' ? (role === 'GOAL' ? 280 : 210) : type === 'IMAGINATION' ? 320 : 310,
-    height: type === 'NODE' ? 90 : 240,
+    width:
+      type === 'NODE'
+        ? role === 'GOAL'
+          ? 280
+          : 210
+        : type === 'GRAPH'
+          ? 280
+          : type === 'IMAGINATION'
+            ? imaginationWidth
+            : type === 'SEED_BOX'
+              ? seedBoxWidth
+              : panelWidth,
+    height:
+      type === 'NODE' || type === 'GRAPH'
+        ? 90
+        : type === 'SEED_BOX'
+          ? seedBoxHeight
+          : panelHeight,
     images: [],
     seeds: [],
-    // Seed Boxes begin compact and grow through 5 → 10 → 20.  The tier is a
-    // presentation capacity, not a second source of truth for the seed list.
-    tier: type === 'SEED_BOX' ? 5 : 10,
+    // Seed Boxes begin compact and grow through 10 → 20 → 30, the same ladder
+    // `seedCapacity` climbs. The tier is a presentation capacity, not a second
+    // source of truth for the seed list.
+    tier: 10,
     shuffle: Math.random(),
     focal: 50,
     imaginationPreset: type === 'IMAGINATION' ? 'small' : undefined,
+    imaginationLayout: type === 'IMAGINATION' ? 'collage' : undefined,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -68,26 +328,76 @@ export function makeObject(
 export function imaginationDimensions(
   imageCount: number,
   preset: ImaginationPreset = 'small',
+  layout: ImaginationLayout = 'collage',
 ) {
-  const base = preset === 'small'
-    ? { width: 320, height: 240 }
-    : preset === 'medium'
-      ? { width: 440, height: 300 }
-      : { width: 580, height: 380 };
-  const scale = imageCount <= 1 ? 1 : imageCount === 2 ? 1.2 : imageCount === 3 ? 1.35 : imageCount === 4 ? 1.5 : imageCount === 5 ? 1.62 : 1.75;
+  const base =
+    preset === 'small'
+      ? { width: imaginationWidth, height: panelHeight }
+      : preset === 'medium'
+        ? { width: 440, height: 300 }
+        : { width: 580, height: 380 };
+  if (!imageCount) return { width: base.width, height: base.height };
+  const normalized = imaginationLayout(layout);
+  if (normalized === 'uniform') {
+    const width = base.width;
+    return {
+      width,
+      height: imaginationGridHeight(width, imageCount, normalized),
+    };
+  }
+  // A collage grows the frame around its primary tile without resizing it.
+  const width = Math.round(base.width * (imageCount === 1 ? 1 : 1.5));
   return {
-    width: Math.round(base.width * scale),
-    height: Math.round(base.height * scale),
+    width,
+    height: imaginationGridHeight(width, imageCount, normalized),
   };
 }
+export function imaginationLayout(
+  layout?: ImaginationLayout,
+): 'collage' | 'uniform' {
+  return layout === 'uniform' || layout === 'spaced' ? 'uniform' : 'collage';
+}
+export function imaginationGridHeight(
+  width: number,
+  imageCount: number,
+  layout: ImaginationLayout = 'collage',
+) {
+  if (!imageCount) return 0;
+  const normalized = imaginationLayout(layout);
+  const count = Math.min(imageCount, 6);
+  const [columns, rows] =
+    normalized === 'uniform'
+      ? count === 1
+        ? [1, 1]
+        : count === 2
+          ? [2, 1]
+          : count === 3
+            ? [3, 1]
+            : count === 4
+              ? [2, 2]
+              : count === 5
+                ? [5, 1]
+                : [3, 2]
+      : [count === 1 ? 2 : 3, count <= 1 ? 2 : count <= 3 ? 2 : 3];
+  const gap = normalized === 'uniform' ? width / 38 : 0;
+  const tile = (width - gap * (columns - 1)) / columns;
+  return Math.round(rows * tile + gap * (rows - 1));
+}
 export function seedCapacity(seedCount: number) {
-  return seedCount > 10 ? 20 : seedCount > 5 ? 10 : 5;
+  return seedCount > 20 ? 30 : seedCount > 10 ? 20 : 10;
 }
 export function objectHeight(o: CanvasObject) {
   if (o.type === 'SEED_BOX')
-    return Math.max(o.height, seedLayout(o).height + 132);
-  if (o.type !== 'NODE') return o.height;
-  const goal = o.role === 'GOAL';
+    return Math.max(o.height, seedLayout(o).height + seedBoxChrome);
+  if (o.type === 'IMAGINATION')
+    return o.images.length
+      ? imaginationGridHeight(o.width, o.images.length, o.imaginationLayout)
+      : o.height;
+  if (!carriesPath(o)) return o.height;
+  // A Graph object is drawn at goal weight, plus the row naming the map it
+  // opens.
+  const graph = o.type === 'GRAPH';
+  const goal = graph || o.role === 'GOAL';
   const columns = Math.max(
     8,
     Math.floor(
@@ -95,15 +405,21 @@ export function objectHeight(o: CanvasObject) {
         (goal ? 12 : 8.5),
     ),
   );
-  const lines = Math.min(2, o.text
-    .split('\n')
-    .reduce(
-      (total, line) => total + Math.max(1, Math.ceil(line.length / columns)),
-      0,
-    ));
-  return goal
-    ? 77 + lines * 32 + (o.images.length ? 145 : 0)
-    : 44 + Math.max(o.images.length ? 48 : 30, lines * 24);
+  const lines = Math.min(
+    2,
+    o.text
+      .split('\n')
+      .reduce(
+        (total, line) => total + Math.max(1, Math.ceil(line.length / columns)),
+        0,
+      ),
+  );
+  const contentHeight =
+    (goal
+      ? 77 + lines * 32 + (o.images.length ? 145 : 0)
+      : 44 + Math.max(o.images.length ? 48 : 30, lines * 24)) +
+    (graph ? 26 : 0);
+  return o.manualHeight ? Math.max(o.height, contentHeight) : contentHeight;
 }
 export function reachable(
   map: VisionMap,
@@ -141,7 +457,7 @@ export function pointerSelectionPlan(
   explicitSelection: boolean,
   objectId: string,
   toggle: boolean,
-  moveBranch = false,
+  followOutgoing = false,
 ): PointerSelectionPlan {
   const clickedSelection = new Set([objectId]);
   if (toggle) {
@@ -156,6 +472,16 @@ export function pointerSelectionPlan(
       startDrag: false,
     };
   }
+  const object = map.objects.find(({ id }) => id === objectId);
+  if (followOutgoing && object && carriesPath(object)) {
+    return {
+      clickedSelection,
+      visibleSelection: new Set(clickedSelection),
+      movementIds: downstream(map, objectId),
+      explicit: false,
+      startDrag: true,
+    };
+  }
   if (explicitSelection && selected.has(objectId)) {
     return {
       clickedSelection,
@@ -165,14 +491,10 @@ export function pointerSelectionPlan(
       startDrag: true,
     };
   }
-  const object = map.objects.find(({ id }) => id === objectId);
   return {
     clickedSelection,
     visibleSelection: new Set(clickedSelection),
-    movementIds:
-      moveBranch && object?.type === 'NODE'
-        ? reachable(map, objectId)
-        : new Set(clickedSelection),
+    movementIds: new Set(clickedSelection),
     explicit: false,
     startDrag: true,
   };
@@ -193,13 +515,13 @@ export function relationError(
   const a = map.objects.find((o) => o.id === sourceId),
     b = map.objects.find((o) => o.id === targetId);
   if (!a || !b) return 'This object no longer exists.';
-  if (type === 'PATH' && (a.type !== 'NODE' || b.type !== 'NODE'))
+  if (type === 'PATH' && !(carriesPath(a) && carriesPath(b)))
     return 'Paths connect nodes and goals only.';
   if (
     type === 'REFERENCE' &&
     !(
-      (a.type === 'IMAGINATION' && b.type === 'NODE') ||
-      (b.type === 'IMAGINATION' && a.type === 'NODE')
+      (a.type === 'IMAGINATION' && carriesPath(b)) ||
+      (b.type === 'IMAGINATION' && carriesPath(a))
     )
   )
     return 'Connect an Imagination to a node or goal.';
@@ -239,15 +561,35 @@ export function connect(
   if (type === 'REFERENCE' && b.type === 'IMAGINATION')
     [sourceId, targetId] = [targetId, sourceId];
   const edge = { id: uid(), sourceId, targetId, type };
+  const child = childEnd(map, edge);
   return {
     ...map,
     relationships: [...map.relationships, edge],
     objects: map.objects.map((o) =>
-      o.id === targetId && type === 'PATH' && !o.attachment
+      o.id === child && type === 'PATH' && !o.attachment
         ? { ...o, attachment: edge.id }
         : o,
     ),
   };
+}
+/**
+ * Hangs `childId` under `parentId`. Between two nodes that is a PATH whose
+ * arrow points the way the map's direction option says; a Seed Box or an
+ * Imagination hangs off by its own connection type, which carries no arrow.
+ */
+export function connectChild(
+  map: VisionMap,
+  parentId: string,
+  childId: string,
+): VisionMap {
+  const parent = map.objects.find((o) => o.id === parentId),
+    child = map.objects.find((o) => o.id === childId);
+  if (!parent || !child) throw new Error('This object no longer exists.');
+  const type = relationType(parent, child);
+  if (type !== 'PATH') return connect(map, parentId, childId, type);
+  return pathDirection(map) === 'inward'
+    ? connect(map, childId, parentId, 'PATH')
+    : connect(map, parentId, childId, 'PATH');
 }
 export function demoMap(): VisionMap {
   const items: [string, number, number, CanvasObject['role']][] = [
@@ -323,12 +665,7 @@ export function removeEdge(map: VisionMap, id: string): VisionMap {
     relationships,
     objects: map.objects.map((o) =>
       o.attachment === id
-        ? {
-            ...o,
-            attachment: relationships.find(
-              (e) => e.type === 'PATH' && e.targetId === o.id,
-            )?.id,
-          }
+        ? { ...o, attachment: attachmentFor(map, relationships, o.id) }
         : o,
     ),
   };
@@ -400,13 +737,12 @@ export function deleteObjects(map: VisionMap, ids: Set<string>): VisionMap {
     ...o,
     attachment: next.relationships.some((e) => e.id === o.attachment)
       ? o.attachment
-      : next.relationships.find((e) => e.type === 'PATH' && e.targetId === o.id)
-          ?.id,
+      : attachmentFor(next, next.relationships, o.id),
   }));
   for (const [a, b] of bridges)
     if (!relationError(next, a, b, 'PATH')) next = connect(next, a, b, 'PATH');
   if (ids.has(next.anchorId))
-    next.anchorId = next.objects.find((o) => o.type === 'NODE')?.id || '';
+    next.anchorId = next.objects.find(carriesPath)?.id || '';
   return next;
 }
 export function copySelection(map: VisionMap, ids: Set<string>): VisionMap {
@@ -447,9 +783,7 @@ export function duplicate(
     id: ids.get(o.id)!,
     x: o.x + offset.x,
     y: o.y + offset.y,
-    attachment: edges.find(
-      (e) => e.targetId === ids.get(o.id) && e.type === 'PATH',
-    )?.id,
+    attachment: attachmentFor(source, edges, ids.get(o.id)!),
     seeds: o.seeds.map((s) => ({ ...s, id: uid(), visualSeed: Math.random() })),
     shuffle: Math.random(),
     createdAt: Date.now(),
@@ -490,30 +824,165 @@ export function freePosition(
   }
   return next;
 }
+/** The title a freshly created object of this kind starts with. */
+export function defaultTitle(type: Kind) {
+  return type === 'SEED_BOX'
+    ? 'Loose ideas'
+    : type === 'IMAGINATION'
+      ? 'Imagination'
+      : '';
+}
 export function branch(
   map: VisionMap,
   id: string,
+  type: Kind = 'NODE',
+  role: CanvasObject['role'] = 'NORMAL',
+  link?: { mapRef: string; title: string },
 ): { map: VisionMap; object: CanvasObject } {
   const parent = map.objects.find((o) => o.id === id);
-  if (!parent || parent.type !== 'NODE')
-    throw new Error('Select a node first.');
+  if (!parent || !carriesPath(parent)) throw new Error('Select a node first.');
   const anchor = map.objects.find((o) => o.id === map.anchorId) || parent;
   const left = parent.x < anchor.x;
   const object = freePosition(
     map,
-    makeObject('NODE', {
-      x: left ? parent.x - 330 : parent.x + parent.width + 110,
-      y: parent.y,
-    }),
+    makeObject(
+      type,
+      {
+        x: left ? parent.x - 330 : parent.x + parent.width + 110,
+        y: parent.y,
+      },
+      type === 'NODE' ? role : 'NORMAL',
+      link?.title ?? defaultTitle(type),
+      link?.mapRef,
+    ),
   );
   const next = { ...map, objects: [...map.objects, object] };
+  return { map: connectChild(next, parent.id, object.id), object };
+}
+/** Whether a connection between these two kinds is expressible at all. */
+function relationAllowed(a: CanvasObject, b: CanvasObject, type: RelationType) {
+  if (type === 'PATH') return carriesPath(a) && carriesPath(b);
+  if (type === 'REFERENCE')
+    return (
+      (a.type === 'IMAGINATION' && carriesPath(b)) ||
+      (b.type === 'IMAGINATION' && carriesPath(a))
+    );
+  return a.type !== 'IMAGINATION' && b.type !== 'IMAGINATION';
+}
+/**
+ * Points every branch attachment at a PATH that really ends on its object.
+ * Retyping or dropping a connection can leave one dangling, and a map with a
+ * dangling attachment does not load.
+ */
+function repairAttachments(map: VisionMap): VisionMap {
   return {
-    map:
-      parent.role === 'GOAL'
-        ? connect(next, object.id, parent.id)
-        : connect(next, parent.id, object.id),
-    object,
+    ...map,
+    objects: map.objects.map((o) => {
+      const kept = map.relationships.some(
+        (e) =>
+          e.id === o.attachment &&
+          e.type === 'PATH' &&
+          (e.targetId === o.id || e.sourceId === o.id),
+      );
+      if (kept) return o;
+      const attachment = attachmentFor(map, map.relationships, o.id);
+      return attachment === o.attachment ? o : { ...o, attachment };
+    }),
   };
+}
+/**
+ * Changes what an object is. Content the new kind cannot hold is dropped and
+ * every connection it takes part in is retyped to what the new pair allows, so
+ * a conversion never leaves a map that fails to load. Undo restores the rest.
+ */
+export function convertObject(
+  map: VisionMap,
+  id: string,
+  type: Kind,
+  role: CanvasObject['role'] = 'NORMAL',
+  mapRef?: string,
+): VisionMap {
+  const object = map.objects.find((o) => o.id === id);
+  if (!object) throw new Error('This object no longer exists.');
+  const nextRole = type === 'NODE' ? role : 'NORMAL';
+  if (type === 'GRAPH' && !mapRef && !object.mapRef)
+    throw new Error('Choose the graph this object opens.');
+  if (
+    object.type === type &&
+    object.role === nextRole &&
+    (type !== 'GRAPH' || !mapRef || mapRef === object.mapRef)
+  )
+    return map;
+  const dimensions =
+    type === 'IMAGINATION'
+      ? imaginationDimensions(
+          object.images.length,
+          object.imaginationPreset,
+          object.imaginationLayout,
+        )
+      : undefined;
+  const converted: CanvasObject = {
+    ...object,
+    type,
+    role: nextRole,
+    // A node carries one image, a Seed Box none, and only a Seed Box has seeds.
+    images:
+      type === 'SEED_BOX'
+        ? []
+        : type === 'NODE'
+          ? object.images.slice(0, 1)
+          : object.images,
+    seeds: type === 'SEED_BOX' ? object.seeds : [],
+    tier: [10, 20, 30].includes(object.tier) ? object.tier : 10,
+    width:
+      dimensions?.width ??
+      (type === 'NODE'
+        ? nextRole === 'GOAL'
+          ? 280
+          : 210
+        : type === 'GRAPH'
+          ? 280
+          : Math.max(minPanelWidth, object.width)),
+    height:
+      dimensions?.height ??
+      (type === 'NODE' || type === 'GRAPH' ? 90 : object.height),
+    manualHeight: type === 'NODE' ? object.manualHeight : undefined,
+    // The link is what a Graph object is; every other kind drops it.
+    mapRef: type === 'GRAPH' ? mapRef || object.mapRef : undefined,
+    imaginationPreset:
+      type === 'IMAGINATION' ? object.imaginationPreset || 'small' : undefined,
+    imaginationLayout:
+      type === 'IMAGINATION'
+        ? object.imaginationLayout || 'collage'
+        : undefined,
+    updatedAt: Date.now(),
+  };
+  const index = new Map(map.objects.map((o) => [o.id, o]));
+  index.set(id, converted);
+  const relationships: Relationship[] = [];
+  for (const edge of map.relationships) {
+    if (edge.sourceId !== id && edge.targetId !== id) {
+      relationships.push(edge);
+      continue;
+    }
+    const a = index.get(edge.sourceId)!,
+      b = index.get(edge.targetId)!;
+    const next = relationType(a, b);
+    if (!relationAllowed(a, b, next)) continue;
+    // A reference is authored with the Imagination as its source.
+    const flip = next === 'REFERENCE' && b.type === 'IMAGINATION';
+    relationships.push({
+      ...edge,
+      type: next,
+      sourceId: flip ? edge.targetId : edge.sourceId,
+      targetId: flip ? edge.sourceId : edge.targetId,
+    });
+  }
+  return repairAttachments({
+    ...map,
+    objects: map.objects.map((o) => (o.id === id ? converted : o)),
+    relationships,
+  });
 }
 export function moveObjects(
   map: VisionMap,
@@ -534,15 +1003,15 @@ export function reparent(
 ): VisionMap {
   const object = map.objects.find((o) => o.id === id),
     target = map.objects.find((o) => o.id === targetId);
-  if (!object || !target || object.type !== 'NODE' || target.type !== 'NODE')
+  if (!object || !target || !carriesPath(object) || !carriesPath(target))
     throw new Error('Drop on a node or goal.');
-  if (reachable(map, id).has(targetId))
+  if (downstream(map, id).has(targetId))
     throw new Error('This would create a circular path.');
   let next = object.attachment ? removeEdge(map, object.attachment) : map;
-  next = connect(next, targetId, id, 'PATH');
+  next = connectChild(next, targetId, id);
   const attached = next.relationships[next.relationships.length - 1];
   next = patchObject(next, id, { attachment: attached.id });
-  const moving = reachable(next, id);
+  const moving = downstream(next, id);
   const anchor = map.objects.find((o) => o.id === map.anchorId);
   const left = target.x < (anchor?.x ?? 0);
   const desired = freePosition(
@@ -580,6 +1049,13 @@ export type PredictiveLayoutInput = {
   draggedRootId: string;
   optionalTargetId?: string;
   explicitSelection: boolean;
+  /**
+   * Resolve overlaps by pushing the moving objects to a free band. Defaults to
+   * true, which is what a drop needs. A drag in flight passes false so the card
+   * tracks the pointer across other cards instead of jumping around them; the
+   * overlap is reported instead and settled when the pointer is released.
+   */
+  settle?: boolean;
 };
 export type RelationshipChange = {
   removedId?: string;
@@ -592,6 +1068,12 @@ export type PredictiveLayoutResult = {
   message?: string;
   relationshipChange?: RelationshipChange;
   affectedObjectIds: Set<string>;
+  /**
+   * Moving objects that sit on top of a resting one in `previewMap`. Empty
+   * whenever the layout settled, so a non-empty set always means the position
+   * cannot be kept as drawn.
+   */
+  overlappingIds: Set<string>;
 };
 const layoutGap = 24;
 const collisionCellSize = 256;
@@ -632,7 +1114,8 @@ function collisionIndex(fixed: readonly CanvasObject[]) {
     );
     for (let x = left; x <= right; x++)
       for (let y = top; y <= bottom; y++)
-        for (const candidate of cells.get(key(x, y)) || []) candidates.add(candidate);
+        for (const candidate of cells.get(key(x, y)) || [])
+          candidates.add(candidate);
     return candidates;
   };
 }
@@ -660,16 +1143,32 @@ function collisionFreeTranslation(
         [...candidatesFor(object)].some((item) => overlaps(object, item)),
       )
     ) {
-      const positions = new Map(translated.map((object) => [object.id, object]));
+      const positions = new Map(
+        translated.map((object) => [object.id, object]),
+      );
       return {
         ...map,
-        objects: map.objects.map((object) => positions.get(object.id) || object),
+        objects: map.objects.map(
+          (object) => positions.get(object.id) || object,
+        ),
       };
     }
     const distance = (Math.floor(attempt / 2) + 1) * step;
     offsetY = attempt % 2 === 0 ? distance : -distance;
   }
   return moveObjects(map, new Set(movingIds), delta);
+}
+/** Moving objects whose placement in `map` collides with a resting object. */
+function overlappingMovingIds(map: VisionMap, movingIds: ReadonlySet<string>) {
+  const moving = map.objects.filter((object) => movingIds.has(object.id));
+  const candidatesFor = collisionIndex(
+    map.objects.filter((object) => !movingIds.has(object.id)),
+  );
+  const overlapping = new Set<string>();
+  for (const object of moving)
+    if ([...candidatesFor(object)].some((item) => overlaps(object, item)))
+      overlapping.add(object.id);
+  return overlapping;
 }
 function deterministicRelationshipId(
   map: VisionMap,
@@ -679,7 +1178,9 @@ function deterministicRelationshipId(
   const prefix = `layout:${sourceId}:${targetId}`;
   let id = prefix;
   let suffix = 1;
-  const used = new Set(map.relationships.map((relationship) => relationship.id));
+  const used = new Set(
+    map.relationships.map((relationship) => relationship.id),
+  );
   while (used.has(id)) id = `${prefix}:${suffix++}`;
   return id;
 }
@@ -697,31 +1198,36 @@ export function predictiveLayout(
     const target = input.baseMap.objects.find(
       (object) => object.id === input.optionalTargetId,
     );
-    if (!root || !target || root.type !== 'NODE' || target.type !== 'NODE')
+    if (!root || !target || !carriesPath(root) || !carriesPath(target))
       invalidMessage = 'Drop on a node or goal.';
-    else if (reachable(input.baseMap, root.id).has(target.id))
+    else if (downstream(input.baseMap, root.id).has(target.id))
       invalidMessage = 'This would create a circular path.';
     else {
       const removedId = root.attachment;
       const relationships = input.baseMap.relationships.filter(
         (relationship) => relationship.id !== removedId,
       );
+      // The new PATH points the way the map's direction option says.
+      const [sourceId, targetId] =
+        pathDirection(input.baseMap) === 'inward'
+          ? [root.id, target.id]
+          : [target.id, root.id];
       const existing = relationships.find(
         (relationship) =>
           relationship.type === 'PATH' &&
-          relationship.sourceId === target.id &&
-          relationship.targetId === root.id,
+          relationship.sourceId === sourceId &&
+          relationship.targetId === targetId,
       );
       const added = existing
         ? undefined
         : {
             id: deterministicRelationshipId(
               { ...input.baseMap, relationships },
-              target.id,
-              root.id,
+              sourceId,
+              targetId,
             ),
-            sourceId: target.id,
-            targetId: root.id,
+            sourceId,
+            targetId,
             type: 'PATH' as const,
           };
       const attachmentId = existing?.id || added!.id;
@@ -737,17 +1243,20 @@ export function predictiveLayout(
       relationshipChange = { removedId, added, attachmentId };
     }
   }
-  const previewMap = collisionFreeTranslation(
-    invalidMessage ? input.baseMap : semanticMap,
-    input.movingIds,
-    input.dragDelta,
-  );
+  const sourceMap = invalidMessage ? input.baseMap : semanticMap;
+  const settle = input.settle !== false;
+  const previewMap = settle
+    ? collisionFreeTranslation(sourceMap, input.movingIds, input.dragDelta)
+    : moveObjects(sourceMap, new Set(input.movingIds), input.dragDelta);
   return {
     previewMap,
     valid: !invalidMessage,
     message: invalidMessage,
     relationshipChange,
     affectedObjectIds,
+    overlappingIds: settle
+      ? new Set<string>()
+      : overlappingMovingIds(previewMap, input.movingIds),
   };
 }
 function deterministicUnit(values: readonly number[]) {
@@ -769,111 +1278,76 @@ function deterministicUnit(values: readonly number[]) {
 export function nextVisualShuffle(current: number) {
   return deterministicUnit([current, 0.61803398875, 17]);
 }
-export function seedLayout(o: CanvasObject) {
-  const available = Math.max(96, o.width - 44);
-  const items = o.seeds.map((seed, index) => {
-    const random = (salt: number) =>
-      deterministicUnit([
-        seed.visualSeed,
-        o.shuffle,
-        o.width,
-        o.height,
-        index,
-        salt,
-      ]);
-    const idealWidth = Math.max(85, seed.text.length * 7.7 + 25);
-    const width = Math.min(
-      available - 18,
-      idealWidth * (0.88 + random(1) * 0.12),
-    );
-    const charactersPerLine = Math.max(1, Math.floor((width - 24) / 9));
-    const height = Math.max(
-      38,
-      Math.ceil(seed.text.length / charactersPerLine) * 20 + 18,
-    );
-    const readableScale = height > 86 ? 0.16 : height > 64 ? 0.42 : 1;
-    const direction = random(2) < 0.5 ? -1 : 1;
-    const rotation = Math.max(
-      -35,
-      Math.min(35, direction * (5 + random(3) * 10) * readableScale),
-    );
-    const radians = (Math.abs(rotation) * Math.PI) / 180;
-    const boundsWidth =
-      Math.abs(Math.cos(radians)) * width + Math.sin(radians) * height;
-    const boundsHeight =
-      Math.sin(radians) * width + Math.abs(Math.cos(radians)) * height;
-    return {
-      seed,
-      width,
-      height,
-      rotation,
-      boundsWidth,
-      boundsHeight,
-      gap: 9 + random(4) * 13,
-      rowOffset: random(5) * 18,
-      rowGap: 11 + random(6) * 12,
-    };
-  });
-  const rows: (typeof items)[] = [];
-  let row: typeof items = [];
-  let rowWidth = 0;
-  for (const item of items) {
-    const required = item.boundsWidth + (row.length ? row.at(-1)!.gap : 0);
-    if (row.length && rowWidth + required > available) {
-      rows.push(row);
-      row = [];
-      rowWidth = 0;
-    }
-    row.push(item);
-    rowWidth += item.boundsWidth + (row.length > 1 ? row.at(-2)!.gap : 0);
+/**
+ * Rearranges the chips in a Seed Box. Shuffle is the only thing that changes
+ * their order, so it reorders the seeds themselves rather than feeding a
+ * layout randomiser: the arrangement then survives a reload, and Undo puts
+ * the previous one back with everything else in the step.
+ */
+export function shuffleSeeds(map: VisionMap, id: string): VisionMap {
+  const o = map.objects.find((o) => o.id === id);
+  if (!o || o.type !== 'SEED_BOX' || o.seeds.length < 2) return map;
+  const shuffle = nextVisualShuffle(o.shuffle);
+  const seeds = [...o.seeds];
+  for (let index = seeds.length - 1; index > 0; index--) {
+    const pick = Math.floor(deterministicUnit([shuffle, index]) * (index + 1));
+    [seeds[index], seeds[pick]] = [seeds[pick], seeds[index]];
   }
-  if (row.length) rows.push(row);
-
+  return patchObject(map, id, { seeds, shuffle });
+}
+/**
+ * Seeds are chips: a left-aligned flow of pills in reading order, wrapped to
+ * the width of the bed. Every measurement comes from the text, so a Seed Box
+ * composes identically on every render and a drag never rearranges it.
+ */
+export function seedLayout(o: CanvasObject) {
+  const available = Math.max(96, o.width - seedBedInset * 2);
   const positions: Array<{
     seed: Seed;
     x: number;
     y: number;
     width: number;
     height: number;
-    rotation: number;
+    multiline: boolean;
   }> = [];
-  let y = 8;
-  for (const currentRow of rows) {
-    const height = Math.max(...currentRow.map((item) => item.boundsHeight));
-    const contentWidth = currentRow.reduce(
-      (total, item, index) =>
-        total + item.boundsWidth + (index ? currentRow[index - 1].gap : 0),
-      0,
+  let x = 0;
+  let y = 0;
+  let rowHeight = 0;
+  // Everything a chip needs beside its text: border, padding and the handle.
+  const chrome = chipBorder * 2 + chipPaddingX * 2 + chipHandleWidth;
+  for (const seed of o.seeds) {
+    const characters = seed.text.trim().length || 1;
+    const width = Math.min(
+      available,
+      Math.max(
+        chipMinWidth,
+        Math.ceil(characters * chipCharacterWidth) + chipTextCushion + chrome,
+      ),
     );
-    let x = Math.min(
-      currentRow[0].rowOffset,
-      Math.max(0, available - contentWidth),
+    const charactersPerLine = Math.max(
+      1,
+      Math.floor((width - chrome - chipTextCushion) / chipCharacterWidth),
     );
-    for (const item of currentRow) {
-      const boundsY = y + height - item.boundsHeight;
-      positions.push({
-        seed: item.seed,
-        x: x + (item.boundsWidth - item.width) / 2,
-        y: boundsY + (item.boundsHeight - item.height) / 2,
-        width: item.width,
-        height: item.height,
-        rotation: item.rotation,
-      });
-      x += item.boundsWidth + item.gap;
+    const lines = Math.ceil(characters / charactersPerLine);
+    const height = lines * chipLineHeight + chipPaddingY * 2 + chipBorder * 2;
+    // A chip that no longer fits on this row opens the next one.
+    if (x && x + width > available) {
+      x = 0;
+      y += rowHeight + seedChipRowGap;
+      rowHeight = 0;
     }
-    y += height + currentRow[0].rowGap;
+    positions.push({ seed, x, y, width, height, multiline: lines > 1 });
+    x += width + seedChipGap;
+    rowHeight = Math.max(rowHeight, height);
   }
-  return {
-    positions,
-    height: rows.length ? y - rows.at(-1)![0].rowGap + 8 : 16,
-  };
+  return { positions, height: positions.length ? y + rowHeight : 0 };
 }
 export function addSeed(map: VisionMap, id: string, text: string): VisionMap {
   const o = map.objects.find((o) => o.id === id);
   if (!o || o.type !== 'SEED_BOX') throw new Error('Select a Seed Box.');
   if (!text.trim()) return map;
-  if (o.seeds.length >= 20)
-    throw new Error('Maximum 20 seeds in this Seed Box.');
+  if (o.seeds.length >= 30)
+    throw new Error('Maximum 30 seeds in this Seed Box.');
   const seeds = [
     ...o.seeds,
     { id: uid(), text: text.trim(), visualSeed: Math.random() },
@@ -882,8 +1356,10 @@ export function addSeed(map: VisionMap, id: string, text: string): VisionMap {
   return patchObject(map, id, {
     seeds,
     tier,
-    height: Math.max(o.height, 132 + seedLayout({ ...o, seeds }).height),
-    shuffle: nextVisualShuffle(o.shuffle),
+    height: Math.max(
+      o.height,
+      seedBoxChrome + seedLayout({ ...o, seeds }).height,
+    ),
   });
 }
 export function moveSeed(
@@ -902,25 +1378,24 @@ export function moveSeed(
     seeds: box.seeds.filter((s) => s.id !== seedId),
   });
   if (target?.type === 'SEED_BOX') {
-    if (target.seeds.length >= 20)
-      throw new Error('Maximum 20 seeds in this Seed Box.');
+    if (target.seeds.length >= 30)
+      throw new Error('Maximum 30 seeds in this Seed Box.');
     const seeds = [...target.seeds, seed];
     next = patchObject(next, target.id, {
       seeds,
       tier: seedCapacity(seeds.length),
-      height: Math.max(target.height, 132 + seedLayout({ ...target, seeds }).height),
+      height: Math.max(
+        target.height,
+        seedBoxChrome + seedLayout({ ...target, seeds }).height,
+      ),
     });
     return { map: next, id: target.id };
   }
-  if (target && target.type !== 'NODE')
+  if (target && !carriesPath(target))
     throw new Error('Drop on the canvas, a node, or another Seed Box.');
   const node = freePosition(next, makeObject('NODE', p, 'NORMAL', seed.text));
   next = { ...next, objects: [...next.objects, node] };
-  if (target)
-    next =
-      target.role === 'GOAL'
-        ? connect(next, node.id, target.id)
-        : connect(next, target.id, node.id);
+  if (target) next = connectChild(next, target.id, node.id);
   return { map: next, id: node.id };
 }
 export function edgePath(a: CanvasObject, b: CanvasObject): string {
@@ -940,6 +1415,23 @@ export function edgePath(a: CanvasObject, b: CanvasObject): string {
   return `M${ac.x},${y1} C${ac.x},${y1 + Math.sign(dy) * bend} ${bc.x},${y2 - Math.sign(dy) * bend} ${bc.x},${y2}`;
 }
 
+function validCrops(crops: unknown): crops is Record<string, ImageCrop> {
+  return (
+    typeof crops === 'object' &&
+    crops !== null &&
+    !Array.isArray(crops) &&
+    Object.values(crops as Record<string, unknown>).every(
+      (crop) =>
+        typeof crop === 'object' &&
+        crop !== null &&
+        [
+          (crop as ImageCrop).x,
+          (crop as ImageCrop).y,
+          (crop as ImageCrop).scale,
+        ].every(Number.isFinite),
+    )
+  );
+}
 export function validateMap(input: unknown): VisionMap {
   const m = input as VisionMap;
   if (
@@ -947,10 +1439,12 @@ export function validateMap(input: unknown): VisionMap {
     m.version !== 1 ||
     typeof m.title !== 'string' ||
     typeof m.anchorId !== 'string' ||
+    (m.pathDirection !== undefined &&
+      !['outward', 'inward'].includes(m.pathDirection)) ||
     !Array.isArray(m.objects) ||
     !Array.isArray(m.relationships)
   )
-    throw new Error('Choose a valid SPREAD map.');
+    throw new Error('Choose a valid Nodestar map.');
   const ids = new Set<string>(),
     seedIds = new Set<string>(),
     edgeIds = new Set<string>();
@@ -960,10 +1454,20 @@ export function validateMap(input: unknown): VisionMap {
       typeof o.id !== 'string' ||
       !o.id ||
       ids.has(o.id) ||
-      !['NODE', 'SEED_BOX', 'IMAGINATION'].includes(o.type) ||
+      !['NODE', 'SEED_BOX', 'IMAGINATION', 'GRAPH'].includes(o.type) ||
       !['NORMAL', 'GOAL'].includes(o.role) ||
       typeof o.text !== 'string' ||
       typeof o.note !== 'string' ||
+      (o.displayTitle !== undefined && typeof o.displayTitle !== 'boolean') ||
+      (o.collapsed !== undefined && typeof o.collapsed !== 'boolean') ||
+      (o.manualHeight !== undefined && typeof o.manualHeight !== 'boolean') ||
+      (o.imaginationLayout !== undefined &&
+        !['collage', 'uniform', 'gapless', 'spaced'].includes(
+          o.imaginationLayout,
+        )) ||
+      (o.focalX !== undefined && !Number.isFinite(o.focalX)) ||
+      (o.crops !== undefined && !validCrops(o.crops)) ||
+      (o.mapRef !== undefined && typeof o.mapRef !== 'string') ||
       ![
         o.x,
         o.y,
@@ -987,11 +1491,14 @@ export function validateMap(input: unknown): VisionMap {
     if (
       (o.type === 'NODE' && o.images.length > 1) ||
       (o.type === 'SEED_BOX' && o.images.length) ||
+      (o.type === 'GRAPH' && o.images.length) ||
       (o.type !== 'SEED_BOX' && o.seeds.length) ||
-      (o.type !== 'NODE' && o.role !== 'NORMAL')
+      (o.type !== 'NODE' && o.role !== 'NORMAL') ||
+      // A Graph object without a link stands for nothing.
+      (o.type === 'GRAPH') !== (typeof o.mapRef === 'string' && !!o.mapRef)
     )
       throw new Error('This map violates object content rules.');
-    if (![5, 10, 20, 30].includes(o.tier) || o.seeds.length > 20)
+    if (![10, 20, 30].includes(o.tier) || o.seeds.length > 30)
       throw new Error('This Seed Box has an invalid capacity.');
     for (const seed of o.seeds) {
       if (
@@ -1026,7 +1533,9 @@ export function validateMap(input: unknown): VisionMap {
       o.attachment &&
       !m.relationships.some(
         (e) =>
-          e.id === o.attachment && e.targetId === o.id && e.type === 'PATH',
+          e.id === o.attachment &&
+          (e.targetId === o.id || e.sourceId === o.id) &&
+          e.type === 'PATH',
       )
     )
       throw new Error('This map contains an invalid branch attachment.');

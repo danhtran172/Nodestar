@@ -1,12 +1,12 @@
 {
-  "name": "spread",
+  "name": "nodestar",
   "version": "0.1.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev --port 5173",
+    "dev": "vinext dev --port 5199",
     "build": "vinext build && node scripts/offline-assets.mjs",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",

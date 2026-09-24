@@ -47,7 +47,10 @@ const fixture = {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((map) => {
     localStorage.clear();
-    localStorage.setItem('spread-recovery-v1', JSON.stringify(map));
+    // These specs cover free canvas placement; graph mode is exercised by
+    // graph-layout.spec.ts.
+    localStorage.setItem('nodestar-layout-mode', 'canvas');
+    localStorage.setItem('nodestar-recovery-v1', JSON.stringify(map));
   }, fixture);
   await page.goto('/');
   await expect(page.locator('[data-object="root"]')).toBeVisible();
